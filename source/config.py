@@ -9,10 +9,10 @@ STRIDE_SEC = SEGMENT_LENGTH_SEC - OVERLAP_SEC  # = 2.3s stride between segments
 FADE_LENGTH_SEC = 0.3          # Hann window fade in/out length in seconds
 
 # Multiprocessing
-WORKER_MULTIPLIER = 0.2        # Number of workers = CPU cores * 1.5
+WORKER_MULTIPLIER = 0.5        # Number of workers = CPU cores * 1.5
 
 # Device for BirdNET inference
-DEVICE = 'CPU'  # oder 'GPU' für GPU-Nutzung; for GPU use install 'pip install birdnet[and-cuda]'
+DEVICE = 'GPU'  # oder 'GPU' für GPU-Nutzung; for GPU use install 'pip install birdnet[and-cuda]'
                 # instead only 'pip install birdnet'
 
 # BirdNET
