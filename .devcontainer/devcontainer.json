@@ -32,7 +32,8 @@
             // user account 'jovyan' to the user id of the owner of the project folder, you will see
             // your own rights as 'jovian' user. (However, if the owner of the project folder is a
             // different user, this behaviour may differ).
-            "source=${localEnv:HOME},target=/home/hostuser,type=bind,consistency=cached"
+            "source=${localEnv:HOME},target=/home/hostuser,type=bind,consistency=cached",
+            "source=/volume1/massdata/backup_less/herbrand,target=/home/hostuser/massdata,type=bind,consistency=cached",
         ],
 
     // Arguments for starting the container

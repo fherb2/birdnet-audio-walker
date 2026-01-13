@@ -26,7 +26,7 @@ def setup_birdnet_model():
     for attempt in range(1, max_retries + 1):
         try:
             logger.info(f"Attempting to load BirdNET model (attempt {attempt}/{max_retries})...")
-            model = birdnet.load("acoustic", "2.4", "tf")
+            model = birdnet.load("acoustic", "2.4", "pb")
             logger.success("BirdNET model loaded successfully!")
             return True
             

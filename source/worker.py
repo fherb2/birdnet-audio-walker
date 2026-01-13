@@ -7,8 +7,7 @@ from datetime import timedelta
 from loguru import logger
 import pandas as pd
 
-from segmentation import load_audio_segment
-from birdnet_analyzer import analyze_segment
+from birdnet_analyzer import analyze_file
 from species_translation import translate_species_name
 from database import insert_detection
 
@@ -24,7 +23,7 @@ def worker_main(
     Worker process main function.
     
     Args:
-        task_queue: Queue with tasks (file_path, segment_start, segment_end, metadata)
+        task_queue: Queue with tasks (file_path, metadata)
         result_queue: Queue for progress updates
         db_path: Path to SQLite database
         translation_table: Species translation table
@@ -42,21 +41,13 @@ def worker_main(
             logger.info(f"Worker {worker_id} received shutdown signal")
             break
         
-        file_path, segment_start, segment_end, metadata = task
+        file_path, metadata = task
         
         try:
-            # Load audio segment with Hann window
-            audio_segment, sample_rate = load_audio_segment(
+            # Analyze entire file with BirdNET
+            # BirdNET handles segmentation internally
+            detections = analyze_file(
                 file_path,
-                segment_start,
-                segment_end,
-                apply_window=True
-            )
-            
-            # Analyze with BirdNET
-            detections = analyze_segment(
-                audio_segment,
-                sample_rate,
                 latitude=metadata.get('gps_lat', 51.1657),
                 longitude=metadata.get('gps_lon', 13.7372),
                 timestamp=metadata['timestamp_utc'],
@@ -71,20 +62,23 @@ def worker_main(
                     translation_table
                 )
                 
-                # Calculate absolute timestamps
-                segment_start_utc = metadata['timestamp_utc'] + timedelta(seconds=segment_start)
-                segment_end_utc = metadata['timestamp_utc'] + timedelta(seconds=segment_end)
-                segment_start_local = metadata['timestamp_local'] + timedelta(seconds=segment_start)
-                segment_end_local = metadata['timestamp_local'] + timedelta(seconds=segment_end)
+                # Calculate absolute timestamps from detection times
+                detection_start_seconds = detection['start_time']
+                detection_end_seconds = detection['end_time']
+                
+                detection_start_utc = metadata['timestamp_utc'] + timedelta(seconds=detection_start_seconds)
+                detection_end_utc = metadata['timestamp_utc'] + timedelta(seconds=detection_end_seconds)
+                detection_start_local = metadata['timestamp_local'] + timedelta(seconds=detection_start_seconds)
+                detection_end_local = metadata['timestamp_local'] + timedelta(seconds=detection_end_seconds)
                 
                 # Insert into database
                 insert_detection(
                     db_path=db_path,
                     filename=metadata['filename'],
-                    segment_start_utc=segment_start_utc,
-                    segment_start_local=segment_start_local,
-                    segment_end_utc=segment_end_utc,
-                    segment_end_local=segment_end_local,
+                    segment_start_utc=detection_start_utc,
+                    segment_start_local=detection_start_local,
+                    segment_end_utc=detection_end_utc,
+                    segment_end_local=detection_end_local,
                     timezone=metadata['timezone'],
                     scientific_name=names['scientific'],
                     name_en=names['en'],
@@ -93,24 +87,21 @@ def worker_main(
                     confidence=detection['confidence']
                 )
             
-            # Send progress update
+            # Send progress update (one per file)
             result_queue.put({
                 'worker_id': worker_id,
                 'filename': metadata['filename'],
-                'segment_start': segment_start,
                 'num_detections': len(detections)
             })
             
         except Exception as e:
             logger.error(
-                f"Worker {worker_id} error processing {metadata['filename']} "
-                f"[{segment_start:.1f}-{segment_end:.1f}s]: {e}"
+                f"Worker {worker_id} error processing {metadata['filename']}: {e}"
             )
             # Send progress update even on error
             result_queue.put({
                 'worker_id': worker_id,
                 'filename': metadata['filename'],
-                'segment_start': segment_start,
                 'num_detections': 0,
                 'error': str(e)
             })
