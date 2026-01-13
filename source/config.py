@@ -2,21 +2,21 @@
 Configuration constants for BirdNET Batch Analyzer.
 """
 
-# Audio Segmentation
-SEGMENT_LENGTH_SEC = 3.0      # Length of each segment in seconds
-OVERLAP_SEC = 0.7              # Overlap on each side in seconds
-STRIDE_SEC = SEGMENT_LENGTH_SEC - OVERLAP_SEC  # = 2.3s stride between segments
-FADE_LENGTH_SEC = 0.3          # Hann window fade in/out length in seconds
+# BirdNET Analysis Parameters
+OVERLAP_DURATION_S = 0.0      # Overlap for BirdNET's internal sliding window (0.0 - 2.9s)
+BATCH_SIZE = 16               # Number of audio chunks to process simultaneously
+TOP_K = None                  # Number of top predictions to return (None = all above threshold)
+BANDPASS_FMIN = 0             # Minimum frequency for bandpass filter (Hz)
+BANDPASS_FMAX = 15000         # Maximum frequency for bandpass filter (Hz)
 
 # Multiprocessing
-WORKER_MULTIPLIER = 0.5        # Number of workers = CPU cores * 1.5
+WORKER_MULTIPLIER = 0.1       # Number of workers = CPU cores * multiplier
 
 # Device for BirdNET inference
-DEVICE = 'GPU'  # oder 'GPU' für GPU-Nutzung; for GPU use install 'pip install birdnet[and-cuda]'
-                # instead only 'pip install birdnet'
+DEVICE = 'GPU'                # 'CPU' or 'GPU' - for GPU use: pip install birdnet[and-cuda]
 
 # BirdNET
-DEFAULT_CONFIDENCE = 0.05      # Default minimum confidence threshold
+DEFAULT_CONFIDENCE = 0.05     # Default minimum confidence threshold
 
 # Species Translation
 SPECIES_CACHE_DIR = "/tmp"
@@ -24,8 +24,8 @@ SPECIES_CACHE_MAX_AGE_DAYS = 7
 SPECIES_TABLE_URL = "https://www.karlincam.cz/de_de/und-sonst-noch/artennamen-uebersetzen/vogelnamen-wissenschaftlich-sortiert"
 
 # Database
-SQLITE_LOCK_TIMEOUT = 10.0     # Lock timeout in seconds
+SQLITE_LOCK_TIMEOUT = 10.0    # Lock timeout in seconds
 
 # Progress Display
-PROGRESS_UPDATE_INTERVAL = 2.0  # Update interval in seconds
-PROGRESS_UPDATE_EVERY_N_TASKS = 10  # Update after every N completed tasks
+PROGRESS_UPDATE_INTERVAL = 2.0      # Update interval in seconds
+PROGRESS_UPDATE_EVERY_N_FILES = 1   # Update after every N completed files

@@ -20,15 +20,13 @@ warnings.filterwarnings('ignore', category=FutureWarning)
 from config import (
     DEFAULT_CONFIDENCE,
     WORKER_MULTIPLIER,
-    PROGRESS_UPDATE_EVERY_N_TASKS
+    PROGRESS_UPDATE_EVERY_N_FILES
 )
 from audiomoth_import import extract_metadata
-from segmentation import generate_segments
 from species_translation import download_species_table
 from database import init_database, insert_metadata, export_to_ods
 from worker import worker_main
 from progress import ProgressDisplay
-from birdnet_analyzer import load_model
 
 
 # Global references
@@ -97,31 +95,22 @@ def create_tasks(metadata_list: list[dict]) -> list[tuple]:
     """
     Create task list for workers.
     
-    Each task is: (file_path, segment_start, segment_end, metadata)
+    Each task is: (file_path, metadata)
     
     Args:
         metadata_list: List of file metadata
         
     Returns:
-        List of tasks
+        List of tasks (one per file)
     """
     logger.info("Creating task list...")
     
     tasks = []
     for metadata in metadata_list:
-        # Generate segments for this file
-        segments = generate_segments(metadata['duration_seconds'])
-        
-        for segment_start, segment_end in segments:
-            task = (
-                metadata['path'],
-                segment_start,
-                segment_end,
-                metadata
-            )
-            tasks.append(task)
+        task = (metadata['path'], metadata)
+        tasks.append(task)
     
-    logger.info(f"Created {len(tasks)} tasks")
+    logger.info(f"Created {len(tasks)} tasks (one per file)")
     return tasks
 
 
@@ -192,13 +181,19 @@ def main():
     logger.info("Loading species translation table...")
     translation_table = download_species_table()
     
-    # Pre-load BirdNET model (avoids parallel downloads in workers)
-    logger.info("Pre-loading BirdNET model...")
-    try:
-        load_model()
-        logger.info("BirdNET model cached successfully")
-    except Exception as e:
-        logger.warning(f"Model pre-load failed (workers will retry): {e}")
+    # Check if BirdNET model is installed
+    logger.info("Checking BirdNET model installation...")
+    model_path = Path.home() / ".local/share/birdnet/acoustic-models/v2.4/pb/model-fp32"
+
+    if not model_path.exists() or not (model_path / "saved_model.pb").exists():
+        logger.error("BirdNET model not found!")
+        logger.error("")
+        logger.error("Please run the setup script first:")
+        logger.error("  python setup_birdnet.py")
+        logger.error("")
+        return 1
+
+    logger.info("BirdNET model found ✓")
     
     # Initialize database in input folder
     db_path = input_folder / "birdnet_analysis.db"
@@ -215,7 +210,7 @@ def main():
     for metadata in metadata_list:
         insert_metadata(db_path, metadata)
     
-    # Create task list
+    # Create task list (one task per file)
     tasks = create_tasks(metadata_list)
     
     # Setup multiprocessing
@@ -251,7 +246,7 @@ def main():
             worker.start()
             workers.append(worker)
         
-        # Progress display
+        # Progress display (now tracks files instead of segments)
         progress = ProgressDisplay(total_segments=len(tasks), num_workers=num_workers)
         
         # Monitor progress
@@ -273,7 +268,7 @@ def main():
                     current_file = result['filename']
                     
                     # Update progress display periodically
-                    if completed % PROGRESS_UPDATE_EVERY_N_TASKS == 0:
+                    if completed % PROGRESS_UPDATE_EVERY_N_FILES == 0:
                         progress.update(completed, current_file, result.get('worker_id'))
             except:
                 pass  # Queue empty or timeout
@@ -311,9 +306,9 @@ def main():
         # Close queues and cancel join threads
         try:
             task_queue.close()
-            task_queue.cancel_join_thread()  # Verhindert Hängen beim Beenden
+            task_queue.cancel_join_thread()
             result_queue.close()
-            result_queue.cancel_join_thread()  # Verhindert Hängen beim Beenden
+            result_queue.cancel_join_thread()
         except:
             pass
         
@@ -335,7 +330,7 @@ def main():
         
         if _shutdown_requested:
             logger.warning("Shutdown requested, exiting without export")
-            sys.exit(1)  # Forciert sofortiges Beenden
+            sys.exit(1)
         
 
     # Count total detections
