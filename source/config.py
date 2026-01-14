@@ -16,7 +16,7 @@ WORKER_MULTIPLIER = 0.1       # Number of workers = CPU cores * multiplier
 DEVICE = 'GPU'                # 'CPU' or 'GPU' - for GPU use: pip install birdnet[and-cuda]
 
 # BirdNET
-DEFAULT_CONFIDENCE = 0.05     # Default minimum confidence threshold
+DEFAULT_CONFIDENCE = 0.09     # Default minimum confidence threshold
 
 # Species Translation
 SPECIES_CACHE_DIR = "/tmp"
