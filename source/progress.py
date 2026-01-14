@@ -10,49 +10,45 @@ from loguru import logger
 class ProgressDisplay:
     """Display progress information during batch processing."""
     
-    def __init__(self, total_segments: int, num_workers: int):
+    def __init__(self, total_files: int):
         """
         Initialize progress display.
         
         Args:
-            total_segments: Total number of segments to process
-            num_workers: Number of worker processes
+            total_files: Total number of files to process
         """
-        self.total_segments = total_segments
-        self.num_workers = num_workers
-        self.completed_segments = 0
+        self.total_files = total_files
+        self.completed_files = 0
         self.current_file = ""
         self.start_time = time.time()
-        self.active_workers = set()
         
-        logger.info(f"Starting processing: {total_segments} segments with {num_workers} workers")
+        logger.info(f"Starting processing: {total_files} files")
     
-    def update(self, completed_segments: int, current_file: str, worker_id: str = None):
+    def update(self, completed_files: int, current_file: str, elapsed: float = None):
         """
         Update display.
         
         Args:
-            completed_segments: Number of completed segments
+            completed_files: Number of completed files
             current_file: Currently processing file
-            worker_id: ID of worker that sent update (optional)
+            elapsed: Elapsed time in seconds (optional)
         """
-        self.completed_segments = completed_segments
+        self.completed_files = completed_files
         self.current_file = current_file
         
-        if worker_id:
-            self.active_workers.add(worker_id)
-        
         # Calculate statistics
-        elapsed = time.time() - self.start_time
-        progress = (completed_segments / self.total_segments * 100) if self.total_segments > 0 else 0
+        if elapsed is None:
+            elapsed = time.time() - self.start_time
         
-        # Calculate segments per second
-        segments_per_sec = completed_segments / elapsed if elapsed > 0 else 0
+        progress = (completed_files / self.total_files * 100) if self.total_files > 0 else 0
+        
+        # Calculate files per second
+        files_per_sec = completed_files / elapsed if elapsed > 0 else 0
         
         # Estimate remaining time
-        if segments_per_sec > 0:
-            remaining_segments = self.total_segments - completed_segments
-            eta_seconds = remaining_segments / segments_per_sec
+        if files_per_sec > 0:
+            remaining_files = self.total_files - completed_files
+            eta_seconds = remaining_files / files_per_sec
             eta = str(timedelta(seconds=int(eta_seconds)))
         else:
             eta = "calculating..."
@@ -61,30 +57,29 @@ class ProgressDisplay:
         print("\r" + "=" * 80)
         print("BirdNET Batch Analyzer - Progress")
         print("=" * 80)
-        print(f"Workers:           {len(self.active_workers)} / {self.num_workers} active")
-        print(f"Segments:          {completed_segments} / {self.total_segments} ({progress:.1f}%)")
+        print(f"Files:             {completed_files} / {self.total_files} ({progress:.1f}%)")
         print(f"Current File:      {current_file}")
-        print(f"Segments/sec:      {segments_per_sec:.2f}")
+        print(f"Files/sec:         {files_per_sec:.2f}")
+        print(f"Elapsed:           {str(timedelta(seconds=int(elapsed)))}")
         print(f"ETA:               {eta}")
         print("=" * 80, end="")
         
-    def finish(self, total_detections: int = None):
+    def finish(self, total_files: int, total_detections: int, elapsed: float):
         """
         Display final statistics.
         
         Args:
-            total_detections: Total number of detections (optional)
+            total_files: Total number of files processed
+            total_detections: Total number of detections
+            elapsed: Total elapsed time in seconds
         """
-        elapsed = time.time() - self.start_time
-        
         print("\n" + "=" * 80)
         print("Processing Complete!")
         print("=" * 80)
-        print(f"Total segments:    {self.completed_segments}")
+        print(f"Total files:       {total_files}")
         print(f"Total time:        {str(timedelta(seconds=int(elapsed)))}")
-        print(f"Average speed:     {self.completed_segments / elapsed:.2f} segments/sec")
-        if total_detections is not None:
-            print(f"Total detections:  {total_detections}")
+        print(f"Average speed:     {total_files / elapsed:.2f} files/sec")
+        print(f"Total detections:  {total_detections}")
         print("=" * 80)
         
-        logger.info(f"Processing finished: {self.completed_segments} segments in {elapsed:.1f}s")
+        logger.info(f"Processing finished: {total_files} files in {elapsed:.1f}s")

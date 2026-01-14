@@ -3,13 +3,12 @@ SQLite database management for BirdNET Batch Analyzer.
 """
 
 import sqlite3
-import fcntl
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from loguru import logger
 import pandas as pd
-from pyexcel_ods3 import save_data
-from collections import OrderedDict
+
+from species_translation import translate_species_name
 
 
 def init_database(db_path: str):
@@ -21,6 +20,9 @@ def init_database(db_path: str):
     """
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
+    
+    # Enable WAL mode for better concurrency
+    cursor.execute("PRAGMA journal_mode=WAL")
     
     # Metadata table
     cursor.execute("""
@@ -44,7 +46,7 @@ def init_database(db_path: str):
         )
     """)
     
-    # Detections table
+    # Detections table (indices created later for performance)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS detections (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -62,10 +64,6 @@ def init_database(db_path: str):
             FOREIGN KEY (filename) REFERENCES metadata(filename)
         )
     """)
-    
-    # Indices for faster queries
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_detections_time ON detections(segment_start_local)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_detections_species ON detections(scientific_name)")
     
     conn.commit()
     conn.close()
@@ -116,145 +114,168 @@ def insert_metadata(db_path: str, metadata: dict):
         conn.close()
 
 
-def insert_detection(
+def batch_insert_detections(
     db_path: str,
     filename: str,
-    segment_start_utc: datetime,
-    segment_start_local: datetime,
-    segment_end_utc: datetime,
-    segment_end_local: datetime,
-    timezone: str,
-    scientific_name: str,
-    name_en: str,
-    name_de: str,
-    name_cs: str,
-    confidence: float
+    metadata: dict,
+    detections: list[dict],
+    translation_table: pd.DataFrame
 ):
     """
-    Insert detection into database with file locking.
+    Insert all detections from one file in a single transaction.
     
     Args:
         db_path: Path to SQLite database
         filename: Original WAV filename
-        segment_start_utc: Segment start time (UTC)
-        segment_start_local: Segment start time (local)
-        segment_end_utc: Segment end time (UTC)
-        segment_end_local: Segment end time (local)
-        timezone: Timezone string ('MEZ' or 'MESZ')
-        scientific_name: Scientific species name
-        name_en: English name
-        name_de: German name
-        name_cs: Czech name
-        confidence: Confidence score
+        metadata: File metadata dict
+        detections: List of detection dicts from BirdNET
+        translation_table: Species translation table
     """
-    # Open database file for locking (create if doesn't exist)
-    db_file = open(db_path, 'a+b')
+    if not detections:
+        return
+    
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
     
     try:
-        # Acquire exclusive lock
-        fcntl.flock(db_file.fileno(), fcntl.LOCK_EX)
+        # Start transaction
+        cursor.execute("BEGIN TRANSACTION")
         
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
+        for detection in detections:
+            # Translate species names
+            names = translate_species_name(
+                detection['scientific_name'],
+                translation_table
+            )
+            
+            # Calculate absolute timestamps from detection times
+            detection_start_seconds = detection['start_time']
+            detection_end_seconds = detection['end_time']
+            
+            detection_start_utc = metadata['timestamp_utc'] + timedelta(seconds=detection_start_seconds)
+            detection_end_utc = metadata['timestamp_utc'] + timedelta(seconds=detection_end_seconds)
+            detection_start_local = metadata['timestamp_local'] + timedelta(seconds=detection_start_seconds)
+            detection_end_local = metadata['timestamp_local'] + timedelta(seconds=detection_end_seconds)
+            
+            # Insert detection
+            cursor.execute("""
+                INSERT INTO detections 
+                (filename, segment_start_utc, segment_start_local, 
+                 segment_end_utc, segment_end_local, timezone,
+                 scientific_name, name_en, name_de, name_cs, confidence)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                filename,
+                detection_start_utc.isoformat(),
+                detection_start_local.isoformat(),
+                detection_end_utc.isoformat(),
+                detection_end_local.isoformat(),
+                metadata['timezone'],
+                names['scientific'],
+                names['en'],
+                names['de'],
+                names['cs'],
+                detection['confidence']
+            ))
         
-        cursor.execute("""
-            INSERT INTO detections 
-            (filename, segment_start_utc, segment_start_local, 
-             segment_end_utc, segment_end_local, timezone,
-             scientific_name, name_en, name_de, name_cs, confidence)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            filename,
-            segment_start_utc.isoformat(),
-            segment_start_local.isoformat(),
-            segment_end_utc.isoformat(),
-            segment_end_local.isoformat(),
-            timezone,
-            scientific_name,
-            name_en,
-            name_de,
-            name_cs,
-            confidence
-        ))
-        
+        # Commit transaction
         conn.commit()
-        conn.close()
+        logger.debug(f"Batch inserted {len(detections)} detections for {filename}")
         
     except Exception as e:
-        logger.error(f"Error inserting detection: {e}")
+        logger.error(f"Error batch inserting detections for {filename}: {e}")
+        conn.rollback()
     finally:
-        # Release lock
-        fcntl.flock(db_file.fileno(), fcntl.LOCK_UN)
-        db_file.close()
+        conn.close()
 
 
-def export_to_ods(db_path: str, output_path: str):
+def db_writer_process(
+    result_queue,
+    db_path: str,
+    translation_table: pd.DataFrame
+):
     """
-    Export SQLite data to ODS file with two sheets.
+    DB writer process - reads from queue and writes to database.
+    
+    Args:
+        result_queue: Multiprocessing queue with detection data
+        db_path: Path to SQLite database
+        translation_table: Species translation table
+    """
+    worker_id = "DB-Writer"
+    logger.info(f"{worker_id} started")
+    
+    files_processed = 0
+    
+    try:
+        while True:
+            # Blocking get from queue
+            data_package = result_queue.get()
+            
+            # Check for poison pill (None = shutdown signal)
+            if data_package is None:
+                logger.info(f"{worker_id} received shutdown signal")
+                break
+            
+            # Extract data
+            filename = data_package['filename']
+            metadata = data_package['metadata']
+            detections = data_package['detections']
+            
+            # Batch insert all detections from this file
+            batch_insert_detections(
+                db_path,
+                filename,
+                metadata,
+                detections,
+                translation_table
+            )
+            
+            files_processed += 1
+            
+    except Exception as e:
+        logger.error(f"{worker_id} error: {e}")
+    finally:
+        logger.info(f"{worker_id} finished - processed {files_processed} files")
+
+
+def create_indices(db_path: str):
+    """
+    Create database indices after all inserts are complete.
+    
+    This is much faster than maintaining indices during inserts.
     
     Args:
         db_path: Path to SQLite database
-        output_path: Path to output ODS file
     """
-    logger.info(f"Exporting database to ODS: {output_path}")
+    logger.info("Creating database indices...")
     
     conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
     
-    # Load detections (sorted by time)
-    detections_df = pd.read_sql_query("""
-        SELECT 
-            filename as "Dateiname",
-            segment_start_utc as "Segment Start (UTC)",
-            segment_start_local as "Segment Start (Lokal)",
-            segment_end_utc as "Segment Ende (UTC)",
-            segment_end_local as "Segment Ende (Lokal)",
-            timezone as "Zeitzone",
-            scientific_name as "Wissenschaftlicher Name",
-            name_en as "Englischer Name",
-            name_de as "Deutscher Name",
-            name_cs as "Tschechischer Name",
-            confidence as "Konfidenz"
-        FROM detections
-        ORDER BY segment_start_local
-    """, conn)
-    
-    # Load metadata
-    metadata_df = pd.read_sql_query("""
-        SELECT 
-            filename as "Dateiname",
-            timestamp_utc as "Zeitstempel (UTC)",
-            timestamp_local as "Zeitstempel (Lokal)",
-            timezone as "Zeitzone",
-            serial as "Geräte-ID",
-            gps_lat as "GPS Latitude",
-            gps_lon as "GPS Longitude",
-            sample_rate as "Sample Rate",
-            channels as "Kanäle",
-            bit_depth as "Bit-Tiefe",
-            duration_seconds as "Dauer",
-            temperature_c as "Temperatur",
-            battery_voltage as "Batteriespannung",
-            gain as "Verstärkung",
-            firmware as "Firmware"
-        FROM metadata
-        ORDER BY timestamp_local
-    """, conn)
-    
-    conn.close()
-    
-    # Replace None with empty string (pyexcel-ods3 can't handle None)
-    detections_df = detections_df.fillna('')
-    metadata_df = metadata_df.fillna('')
-
-    # Convert DataFrames to list of lists for pyexcel-ods3
-    detections_data = [detections_df.columns.tolist()] + detections_df.values.tolist()
-    metadata_data = [metadata_df.columns.tolist()] + metadata_df.values.tolist()
-
-    # Create ODS with two sheets
-    data = OrderedDict()
-    data["Detektionen"] = detections_data
-    data["Metadaten"] = metadata_data
-
-    save_data(output_path, data)
-    
-    logger.info(f"Export complete: {len(detections_df)} detections, {len(metadata_df)} files")
+    try:
+        # Index for time-based queries
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_detections_time 
+            ON detections(segment_start_local)
+        """)
+        
+        # Index for species-based queries
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_detections_species 
+            ON detections(scientific_name)
+        """)
+        
+        # Index for filename-based queries
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_detections_filename 
+            ON detections(filename)
+        """)
+        
+        conn.commit()
+        logger.info("Database indices created ✓")
+        
+    except Exception as e:
+        logger.error(f"Error creating indices: {e}")
+    finally:
+        conn.close()
