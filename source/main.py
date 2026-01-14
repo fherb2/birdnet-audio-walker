@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-BirdNET Batch Analyzer - Main Program
+BirdNET Batch Analyzer - Main Program (Single GPU Process + DB Writer)
 
-Analyzes AudioMoth recordings with BirdNET and exports results to ODS.
+Analyzes AudioMoth recordings with BirdNET and stores results in SQLite.
 """
 
 import argparse
@@ -19,31 +19,35 @@ warnings.filterwarnings('ignore', category=FutureWarning)
 
 from config import (
     DEFAULT_CONFIDENCE,
-    WORKER_MULTIPLIER,
-    PROGRESS_UPDATE_EVERY_N_FILES
+    QUEUE_SIZE,
+    SLEEP_INTERVAL
 )
 from audiomoth_import import extract_metadata
 from species_translation import download_species_table
-from database import init_database, insert_metadata, export_to_ods
-from worker import worker_main
+from database import init_database, insert_metadata, db_writer_process, create_indices
+from birdnet_analyzer import load_model, analyze_file
 from progress import ProgressDisplay
 
 
-# Global references
+# Global references for signal handler
 _shutdown_requested = False
-_workers = []
+_db_writer_process = None
+
 
 def signal_handler(signum, frame):
     """Handle Ctrl+C and other termination signals."""
-    global _shutdown_requested, _workers
+    global _shutdown_requested, _db_writer_process
     logger.warning(f"Received signal {signum}, initiating shutdown...")
     _shutdown_requested = True
     
-    # Immediately kill all workers
-    for worker in _workers:
-        if worker.is_alive():
-            logger.info(f"Force-killing {worker.name}")
-            worker.kill()
+    # Terminate DB writer if still running
+    if _db_writer_process and _db_writer_process.is_alive():
+        logger.info("Terminating DB writer process...")
+        _db_writer_process.terminate()
+        _db_writer_process.join(timeout=2.0)
+        if _db_writer_process.is_alive():
+            _db_writer_process.kill()
+
 
 def find_wav_files(input_folder: Path) -> list[Path]:
     """
@@ -91,33 +95,10 @@ def extract_and_sort_metadata(wav_files: list[Path]) -> list[dict]:
     return metadata_list
 
 
-def create_tasks(metadata_list: list[dict]) -> list[tuple]:
-    """
-    Create task list for workers.
-    
-    Each task is: (file_path, metadata)
-    
-    Args:
-        metadata_list: List of file metadata
-        
-    Returns:
-        List of tasks (one per file)
-    """
-    logger.info("Creating task list...")
-    
-    tasks = []
-    for metadata in metadata_list:
-        task = (metadata['path'], metadata)
-        tasks.append(task)
-    
-    logger.info(f"Created {len(tasks)} tasks (one per file)")
-    return tasks
-
-
 def main():
     """Main program entry point."""
     global _shutdown_requested
-    global _workers
+    global _db_writer_process
 
     # Setup logging
     logger.add(
@@ -141,12 +122,6 @@ def main():
         help="Path to folder containing WAV files"
     )
     parser.add_argument(
-        "--output", "-o",
-        type=str,
-        default="results.ods",
-        help="Output ODS file (default: results.ods)"
-    )
-    parser.add_argument(
         "--confidence", "-c",
         type=float,
         default=DEFAULT_CONFIDENCE,
@@ -160,10 +135,6 @@ def main():
     if not input_folder.exists():
         logger.error(f"Input folder does not exist: {input_folder}")
         return 1
-    
-    # If output path is default, place it in input folder
-    if args.output == "results.ods":
-        args.output = str(input_folder / "results.ods")
     
     # Find WAV files
     wav_files = find_wav_files(input_folder)
@@ -210,76 +181,94 @@ def main():
     for metadata in metadata_list:
         insert_metadata(db_path, metadata)
     
-    # Create task list (one task per file)
-    tasks = create_tasks(metadata_list)
-    
-    # Setup multiprocessing
+    # Setup multiprocessing for Queue
     multiprocessing.set_start_method('spawn', force=True)
-    num_workers = int(multiprocessing.cpu_count() * WORKER_MULTIPLIER)
     
-    logger.info(f"Starting {num_workers} worker processes...")
+    # Create result queue with limited size
+    result_queue = multiprocessing.Queue(maxsize=QUEUE_SIZE)
     
-    # Create queues
-    task_queue = multiprocessing.Queue()
-    result_queue = multiprocessing.Queue()
+    # Start DB writer process
+    logger.info("Starting database writer process...")
+    db_writer = multiprocessing.Process(
+        target=db_writer_process,
+        args=(result_queue, db_path, translation_table),
+        name="DB-Writer"
+    )
+    db_writer.start()
+    _db_writer_process = db_writer
     
-    # Fill task queue
-    for task in tasks:
-        task_queue.put(task)
+    # Load BirdNET model (once for entire run)
+    logger.info("Loading BirdNET model...")
+    model = load_model()
+    logger.info("BirdNET model loaded ✓")
     
-    # Add poison pills (one per worker)
-    for _ in range(num_workers):
-        task_queue.put(None)
+    # Progress display
+    progress = ProgressDisplay(total_files=len(metadata_list))
     
-    # Start workers
-    workers = []
-
-    _workers = workers  # Make workers accessible to signal handler
-
+    # Main processing loop
+    completed = 0
+    start_time = time.time()
+    
     try:
-        for i in range(num_workers):
-            worker = multiprocessing.Process(
-                target=worker_main,
-                args=(task_queue, result_queue, db_path, translation_table, args.confidence),
-                name=f"Worker-{i+1}"
-            )
-            worker.start()
-            workers.append(worker)
-        
-        # Progress display (now tracks files instead of segments)
-        progress = ProgressDisplay(total_segments=len(tasks), num_workers=num_workers)
-        
-        # Monitor progress
-        completed = 0
-        last_update_time = time.time()
-        current_file = ""
-        
-        while completed < len(tasks):
+        for metadata in metadata_list:
             # Check for shutdown signal
             if _shutdown_requested:
                 logger.warning("Shutdown requested, stopping...")
                 break
             
-            # Check for results with timeout
+            file_path = metadata['path']
+            
             try:
-                while not result_queue.empty():
-                    result = result_queue.get(timeout=0.1)
-                    completed += 1
-                    current_file = result['filename']
+                # Analyze file with BirdNET (blocking call)
+                detections = analyze_file(
+                    file_path,
+                    latitude=metadata.get('gps_lat', 51.1657),
+                    longitude=metadata.get('gps_lon', 13.7372),
+                    timestamp=metadata['timestamp_utc'],
+                    min_confidence=args.confidence
+                )
+                
+                # Prepare data package for DB writer
+                data_package = {
+                    'filename': metadata['filename'],
+                    'metadata': metadata,
+                    'detections': detections
+                }
+                
+                # Non-blocking queue put with wait loop
+                while True:
+                    if _shutdown_requested:
+                        break
                     
-                    # Update progress display periodically
-                    if completed % PROGRESS_UPDATE_EVERY_N_FILES == 0:
-                        progress.update(completed, current_file, result.get('worker_id'))
-            except:
-                pass  # Queue empty or timeout
-            
-            # Also update every 2 seconds
-            if time.time() - last_update_time >= 2.0:
-                progress.update(completed, current_file)
-                last_update_time = time.time()
-            
-            time.sleep(0.1)
+                    try:
+                        result_queue.put(data_package, block=False)
+                        break
+                    except:  # Queue full
+                        time.sleep(SLEEP_INTERVAL)
+                
+                completed += 1
+                
+                # Update progress
+                elapsed = time.time() - start_time
+                progress.update(completed, metadata['filename'], elapsed)
+                
+            except Exception as e:
+                logger.error(f"Error processing {metadata['filename']}: {e}")
+                completed += 1
         
+        # Send poison pill to DB writer
+        logger.info("Sending shutdown signal to DB writer...")
+        result_queue.put(None)
+        
+        # Wait for DB writer to finish
+        logger.info("Waiting for DB writer to complete...")
+        db_writer.join(timeout=60.0)
+        
+        if db_writer.is_alive():
+            logger.warning("DB writer did not finish in time, terminating...")
+            db_writer.terminate()
+            db_writer.join(timeout=2.0)
+    
     except KeyboardInterrupt:
         logger.warning("KeyboardInterrupt received, cleaning up...")
         _shutdown_requested = True
@@ -287,52 +276,25 @@ def main():
         logger.error(f"Error in main processing: {e}")
         _shutdown_requested = True
     finally:
-        # Cleanup: Terminate all workers
-        logger.info("Cleaning up workers...")
+        # Cleanup
+        if db_writer.is_alive():
+            logger.info("Terminating DB writer...")
+            db_writer.terminate()
+            db_writer.join(timeout=2.0)
+            if db_writer.is_alive():
+                db_writer.kill()
         
-        # Clear queues to unblock workers
+        # Close queue
         try:
-            while not task_queue.empty():
-                task_queue.get_nowait()
-        except:
-            pass
-        
-        try:
-            while not result_queue.empty():
-                result_queue.get_nowait()
-        except:
-            pass
-        
-        # Close queues and cancel join threads
-        try:
-            task_queue.close()
-            task_queue.cancel_join_thread()
             result_queue.close()
             result_queue.cancel_join_thread()
         except:
             pass
         
-        # Terminate workers
-        for worker in workers:
-            if worker.is_alive():
-                logger.debug(f"Terminating {worker.name}")
-                worker.terminate()
-        
-        # Wait for termination (with timeout)
-        for worker in workers:
-            worker.join(timeout=2.0)
-            if worker.is_alive():
-                logger.warning(f"{worker.name} did not terminate, killing...")
-                worker.kill()
-                worker.join(timeout=1.0)
-        
-        logger.info("All workers cleaned up")
-        
         if _shutdown_requested:
-            logger.warning("Shutdown requested, exiting without export")
+            logger.warning("Shutdown requested, exiting without final steps")
             sys.exit(1)
-        
-
+    
     # Count total detections
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
@@ -341,13 +303,15 @@ def main():
     conn.close()
     
     # Display final progress
-    progress.finish(total_detections=total_detections)
+    elapsed = time.time() - start_time
+    progress.finish(total_files=completed, total_detections=total_detections, elapsed=elapsed)
     
-    # Export to ODS
-    logger.info(f"Exporting results to {args.output}...")
-    export_to_ods(db_path, args.output)
+    # Create indices for fast queries
+    logger.info("Creating database indices...")
+    create_indices(db_path)
     
     logger.info("Analysis complete!")
+    logger.info(f"Results saved in: {db_path}")
     return 0
 
 
