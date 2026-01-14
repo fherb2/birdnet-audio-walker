@@ -1,5 +1,6 @@
 tests/test-data/
 tests/test_data/
+tests/test_results/
 
 
 # Byte-compiled / optimized / DLL files
