@@ -346,11 +346,35 @@ def process_folder(
     # Get list of already completed files
     completed_files = get_completed_files(str(db_path))
     
-    # Filter out completed files
-    files_to_process = [m for m in metadata_list if m['filename'] not in completed_files]
-    
     if completed_files:
         logger.info(f"Found {len(completed_files)} already completed files")
+    
+    # After cleanup, we need to process all files that are 'pending'
+    # This includes both new files AND files that were cleaned up
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT filename FROM processing_status
+        WHERE status = 'pending'
+    """)
+    pending_filenames = {row[0] for row in cursor.fetchall()}
+    conn.close()
+    
+    # Get metadata for all pending files
+    files_to_process = [m for m in metadata_list if m['filename'] in pending_filenames]
+    
+    # For files in pending but not in metadata_list (they existed before), load metadata
+    missing_from_list = pending_filenames - {m['filename'] for m in metadata_list}
+    if missing_from_list:
+        logger.info(f"Loading metadata for {len(missing_from_list)} previously incomplete files...")
+        for wav_file in wav_files:
+            if wav_file.name in missing_from_list:
+                try:
+                    metadata = extract_metadata(str(wav_file))
+                    metadata['path'] = str(wav_file)
+                    files_to_process.append(metadata)
+                except Exception as e:
+                    logger.error(f"Failed to extract metadata from {wav_file.name}: {e}")
     
     if not files_to_process:
         logger.info("All files in this folder already processed!")
