@@ -4,7 +4,8 @@ Configuration constants for BirdNET Batch Analyzer.
 
 # BirdNET Analysis Parameters
 OVERLAP_DURATION_S = 0.0      # Overlap for BirdNET's internal sliding window (0.0 - 2.9s)
-BATCH_SIZE = 16               # Number of audio chunks to process simultaneously
+BATCH_SIZE = 32              # Number of audio chunks to process simultaneously (optimal value
+
 TOP_K = None                  # Number of top predictions to return (None = all above threshold)
 BANDPASS_FMIN = 0             # Minimum frequency for bandpass filter (Hz)
 BANDPASS_FMAX = 15000         # Maximum frequency for bandpass filter (Hz)

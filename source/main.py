@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """
-BirdNET Batch Analyzer - Main Program (Single GPU Process + DB Writer)
+BirdNET Batch Analyzer - Main Program (Simple Sequential + DB Writer)
 
-Analyzes AudioMoth recordings with BirdNET and stores results in SQLite.
+Single BirdNET instance processes files sequentially.
+Separate DB Writer process handles database inserts.
+Captures and filters TensorFlow output during prediction.
 """
 
 import argparse
@@ -11,6 +13,8 @@ import sqlite3
 import time
 import signal
 import sys
+import io
+import contextlib
 from pathlib import Path
 from loguru import logger
 
@@ -34,6 +38,28 @@ _shutdown_requested = False
 _db_writer_process = None
 
 
+@contextlib.contextmanager
+def capture_tf_output():
+    """
+    Capture TensorFlow stdout/stderr during prediction.
+    
+    Yields:
+        Tuple of (stdout_capture, stderr_capture) StringIO objects
+    """
+    old_stdout = sys.stdout
+    old_stderr = sys.stderr
+    stdout_capture = io.StringIO()
+    stderr_capture = io.StringIO()
+    
+    try:
+        sys.stdout = stdout_capture
+        sys.stderr = stderr_capture
+        yield stdout_capture, stderr_capture
+    finally:
+        sys.stdout = old_stdout
+        sys.stderr = old_stderr
+
+
 def signal_handler(signum, frame):
     """Handle Ctrl+C and other termination signals."""
     global _shutdown_requested, _db_writer_process
@@ -42,23 +68,12 @@ def signal_handler(signum, frame):
     
     # Terminate DB writer if still running
     if _db_writer_process and _db_writer_process.is_alive():
-        logger.info("Terminating DB writer process...")
-        _db_writer_process.terminate()
-        _db_writer_process.join(timeout=2.0)
-        if _db_writer_process.is_alive():
-            _db_writer_process.kill()
+        logger.info("Force-killing DB-Writer")
+        _db_writer_process.kill()
 
 
 def find_wav_files(input_folder: Path) -> list[Path]:
-    """
-    Find all WAV files in input folder.
-    
-    Args:
-        input_folder: Path to input folder
-        
-    Returns:
-        List of WAV file paths
-    """
+    """Find all WAV files in input folder."""
     wav_files = []
     for ext in ['*.wav', '*.WAV']:
         wav_files.extend(input_folder.glob(ext))
@@ -68,15 +83,7 @@ def find_wav_files(input_folder: Path) -> list[Path]:
 
 
 def extract_and_sort_metadata(wav_files: list[Path]) -> list[dict]:
-    """
-    Extract metadata from all files and sort by timestamp.
-    
-    Args:
-        wav_files: List of WAV file paths
-        
-    Returns:
-        List of metadata dicts, sorted by timestamp
-    """
+    """Extract metadata from all files and sort by timestamp."""
     logger.info("Extracting metadata from all files...")
     
     metadata_list = []
@@ -88,9 +95,7 @@ def extract_and_sort_metadata(wav_files: list[Path]) -> list[dict]:
         except Exception as e:
             logger.error(f"Failed to extract metadata from {wav_file.name}: {e}")
     
-    # Sort by timestamp
     metadata_list.sort(key=lambda m: m['timestamp_utc'])
-    
     logger.info(f"Metadata extracted from {len(metadata_list)} files")
     return metadata_list
 
@@ -205,7 +210,7 @@ def main():
     # Progress display
     progress = ProgressDisplay(total_files=len(metadata_list))
     
-    # Main processing loop
+    # Main processing loop - sequential
     completed = 0
     start_time = time.time()
     
@@ -217,20 +222,59 @@ def main():
                 break
             
             file_path = metadata['path']
+            filename = metadata['filename']
             
             try:
-                # Analyze file with BirdNET (blocking call)
-                detections = analyze_file(
-                    file_path,
-                    latitude=metadata.get('gps_lat', 51.1657),
-                    longitude=metadata.get('gps_lon', 13.7372),
-                    timestamp=metadata['timestamp_utc'],
-                    min_confidence=args.confidence
-                )
+                # Capture TensorFlow output during prediction
+                with capture_tf_output() as (stdout_capture, stderr_capture):
+                    detections = analyze_file(
+                        file_path,
+                        latitude=metadata.get('gps_lat', 51.1657),
+                        longitude=metadata.get('gps_lon', 13.7372),
+                        timestamp=metadata['timestamp_utc'],
+                        min_confidence=args.confidence
+                    )
+                
+                # Check captured output for errors
+                stdout_output = stdout_capture.getvalue()
+                stderr_output = stderr_capture.getvalue()
+                
+                # Check for critical errors
+                has_error = False
+                
+                if "error" in stderr_output.lower() and "error" not in stderr_output.lower().replace("0 error", ""):
+                    logger.error(f"TensorFlow error for {filename}:")
+                    logger.error(stderr_output)
+                    has_error = True
+                
+                if "cancelled" in stderr_output.lower():
+                    logger.error(f"Analysis cancelled for {filename}:")
+                    logger.error(stderr_output)
+                    has_error = True
+                
+                if "out of memory" in stderr_output.lower() or "oom" in stderr_output.lower():
+                    logger.error(f"GPU out of memory for {filename}:")
+                    logger.error(stderr_output)
+                    has_error = True
+                
+                # Log warnings if present
+                if "warning" in stderr_output.lower():
+                    logger.warning(f"TensorFlow warnings for {filename}:")
+                    logger.warning(stderr_output)
+                
+                # Log debug output if verbose
+                if stdout_output.strip():
+                    logger.debug(f"TensorFlow stdout for {filename}: {stdout_output}")
+                
+                # Skip file if critical error occurred
+                if has_error:
+                    logger.error(f"Skipping {filename} due to errors")
+                    completed += 1
+                    continue
                 
                 # Prepare data package for DB writer
                 data_package = {
-                    'filename': metadata['filename'],
+                    'filename': filename,
                     'metadata': metadata,
                     'detections': detections
                 }
@@ -250,10 +294,10 @@ def main():
                 
                 # Update progress
                 elapsed = time.time() - start_time
-                progress.update(completed, metadata['filename'], elapsed)
+                progress.update(completed, filename, elapsed)
                 
             except Exception as e:
-                logger.error(f"Error processing {metadata['filename']}: {e}")
+                logger.error(f"Error processing {filename}: {e}")
                 completed += 1
         
         # Send poison pill to DB writer
@@ -276,7 +320,7 @@ def main():
         logger.error(f"Error in main processing: {e}")
         _shutdown_requested = True
     finally:
-        # Cleanup
+        # Cleanup: Terminate DB writer
         if db_writer.is_alive():
             logger.info("Terminating DB writer...")
             db_writer.terminate()
