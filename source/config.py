@@ -2,6 +2,8 @@
 Configuration constants for BirdNET Batch Analyzer.
 """
 
+from pathlib import Path
+
 # BirdNET Analysis Parameters
 OVERLAP_DURATION_S = 0.0      # Overlap for BirdNET's internal sliding window (0.0 - 2.9s)
 BATCH_SIZE = 32              # Number of audio chunks to process simultaneously (optimal value
@@ -31,3 +33,7 @@ INDEX_NAMES = [
     "idx_detections_species",         # Species-based index
     "idx_detections_filename"         # Filename-based index
 ]
+
+# BirdNET Labels
+BIRDNET_LABELS_PATH = Path.home() / ".local/share/birdnet/acoustic-models/v2.4/pb/labels"
+DEFAULT_LANGUAGE = "de"

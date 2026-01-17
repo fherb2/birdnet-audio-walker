@@ -96,38 +96,45 @@ def download_species_table(cache_dir: str = SPECIES_CACHE_DIR) -> pd.DataFrame:
             return pd.DataFrame(columns=['scientific', 'en', 'de', 'cs'])
 
 
+
 def translate_species_name(
     scientific_name: str,
-    translation_table: pd.DataFrame
+    translation_table: pd.DataFrame,
+    birdnet_labels: dict
 ) -> dict:
     """
-    Translate scientific name to German and Czech.
+    Translate scientific name to local language (from BirdNET) and Czech (from web table).
     
     Args:
         scientific_name: Scientific species name (e.g., "Parus major")
-        translation_table: Translation DataFrame
+        translation_table: Translation DataFrame from karlincam.cz
+        birdnet_labels: BirdNET labels dict for selected language
         
     Returns:
-        dict with keys: 'scientific', 'en', 'de', 'cs'
-        If not found, 'en', 'de', 'cs' are set to scientific_name
+        dict with keys: 'scientific', 'en', 'local', 'cs'
+        Missing translations are filled with scientific name
     """
-    # Look up in translation table
+    # Get local name from BirdNET labels
+    local_name = birdnet_labels.get(scientific_name, scientific_name)
+    
+    # Get English and Czech from web translation table
     match = translation_table[translation_table['scientific'] == scientific_name]
     
     if not match.empty:
         row = match.iloc[0]
-        return {
-            'scientific': scientific_name,
-            'en': row['en'],
-            'de': row['de'],
-            'cs': row['cs']
-        }
+        en_name = row['en']
+        cs_name = row['cs']
     else:
-        # Not found - use scientific name for all
-        logger.debug(f"Species not found in translation table: {scientific_name}")
-        return {
-            'scientific': scientific_name,
-            'en': scientific_name,
-            'de': scientific_name,
-            'cs': scientific_name
-        }
+        # Not found in web table - use scientific name as fallback
+        logger.debug(f"Species not found in web translation table: {scientific_name}")
+        en_name = scientific_name
+        cs_name = scientific_name
+    
+    return {
+        'scientific': scientific_name,
+        'en': en_name,
+        'local': local_name,
+        'cs': cs_name
+    }
+
+
