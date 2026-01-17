@@ -34,6 +34,12 @@ INDEX_NAMES = [
     "idx_detections_filename"         # Filename-based index
 ]
 
-# BirdNET Labels
+# BirdNET Model
+BIRDNET_MODEL_PATH = Path.home() / ".local/share/birdnet/acoustic-models/v2.4/"
 BIRDNET_LABELS_PATH = Path.home() / ".local/share/birdnet/acoustic-models/v2.4/pb/labels"
 DEFAULT_LANGUAGE = "de"
+
+# BirdNET Model Download
+BIRDNET_DOWNLOAD_MAX_RETRIES = 2
+BIRDNET_DOWNLOAD_BASE_WAIT = 60  # Base wait time in seconds for retry
+BIRDNET_DOWNLOAD_PROMPT_TIMEOUT = 20  # Seconds to wait for user input

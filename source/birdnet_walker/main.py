@@ -15,6 +15,8 @@ import signal
 import sys
 import io
 import contextlib
+import threading
+import birdnet
 from pathlib import Path
 from loguru import logger
 
@@ -26,7 +28,10 @@ from .config import (
     QUEUE_SIZE,
     SLEEP_INTERVAL,
     DEFAULT_LANGUAGE,
-    BIRDNET_LABELS_PATH
+    BIRDNET_LABELS_PATH,
+    BIRDNET_DOWNLOAD_MAX_RETRIES,
+    BIRDNET_DOWNLOAD_BASE_WAIT,
+    BIRDNET_DOWNLOAD_PROMPT_TIMEOUT
 )
 from .audiomoth_import import extract_metadata
 from .species_translation import download_species_table
@@ -66,6 +71,135 @@ def capture_tf_output():
         sys.stdout = old_stdout
         sys.stderr = old_stderr
 
+def input_with_timeout(prompt: str, timeout: int, default: str = 'y') -> str:
+    """
+    Get user input with timeout.
+    
+    Args:
+        prompt: Prompt to display
+        timeout: Timeout in seconds
+        default: Default value if timeout expires
+        
+    Returns:
+        User input or default value
+    """
+    print(prompt, end='', flush=True)
+    
+    result = [default]  # Mutable to share between threads
+    
+    def get_input():
+        try:
+            result[0] = input().strip().lower()
+        except:
+            pass
+    
+    input_thread = threading.Thread(target=get_input, daemon=True)
+    input_thread.start()
+    input_thread.join(timeout=timeout)
+    
+    if input_thread.is_alive():
+        print(f"\nNo response after {timeout}s, proceeding with default [{default.upper()}]")
+    
+    return result[0]
+
+def download_birdnet_model() -> bool:
+    """
+    Download BirdNET model with retry logic.
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    
+    max_retries = BIRDNET_DOWNLOAD_MAX_RETRIES
+    base_wait = BIRDNET_DOWNLOAD_BASE_WAIT
+    
+    for attempt in range(1, max_retries + 1):
+        try:
+            logger.info(f"Downloading BirdNET model (attempt {attempt}/{max_retries})...")
+            logger.info("This may take several minutes depending on your connection...")
+            
+            model = birdnet.load("acoustic", "2.4", "pb")
+            
+            logger.info("BirdNET model downloaded successfully! ✓")
+            return True
+            
+        except ValueError as e:
+            if "403" in str(e):
+                if attempt < max_retries:
+                    wait_time = base_wait * (2 ** (attempt - 1))  # Exponential backoff
+                    logger.warning(f"Rate limit hit (403). Waiting {wait_time} seconds before retry...")
+                    time.sleep(wait_time)
+                else:
+                    logger.error("Maximum retries reached. Rate limit persists.")
+                    logger.error("")
+                    logger.error("="*80)
+                    logger.error("MANUAL INSTALLATION REQUIRED")
+                    logger.error("="*80)
+                    logger.error("Download manually:")
+                    logger.error("  cd /tmp")
+                    logger.error("  wget https://zenodo.org/records/15050749/files/BirdNET_v2.4_protobuf.zip")
+                    logger.error("  unzip -q BirdNET_v2.4_protobuf.zip -d birdnet_extract")
+                    logger.error("")
+                    logger.error("Then install:")
+                    logger.error("  mkdir -p ~/.local/share/birdnet/acoustic-models/v2.4/pb/")
+                    logger.error("  cp -r /tmp/birdnet_extract/audio-model ~/.local/share/birdnet/acoustic-models/v2.4/pb/model-fp32")
+                    logger.error("  cp -r /tmp/birdnet_extract/labels ~/.local/share/birdnet/acoustic-models/v2.4/pb/labels")
+                    logger.error("="*80)
+                    return False
+            else:
+                logger.error(f"Download error: {e}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Unexpected error during model download: {e}")
+            return False
+    
+    return False
+
+
+def setup_model_with_prompt(auto_download: bool, no_auto_download: bool) -> bool:
+    """
+    Prompt user to download BirdNET model or download automatically.
+    
+    Args:
+        auto_download: If True, download without asking
+        no_auto_download: If True, don't download and exit
+        
+    Returns:
+        True if model is available, False otherwise
+    """
+    
+    logger.warning("BirdNET model not found!")
+    logger.info("")
+    
+    if no_auto_download:
+        logger.error("Model download disabled (--no-auto-download)")
+        logger.error("Please download manually or remove --no-auto-download flag")
+        return False
+    
+    if auto_download:
+        logger.info("Auto-download enabled (--auto-download)")
+        logger.info("Starting download...")
+        return download_birdnet_model()
+    
+    # Interactive prompt with timeout
+    logger.info("The BirdNET model (~120 MB) needs to be downloaded.")
+    logger.info(f"You have {BIRDNET_DOWNLOAD_PROMPT_TIMEOUT} seconds to respond.")
+    logger.info("")
+    
+    response = input_with_timeout(
+        "Download now? [Y/n]: ",
+        timeout=BIRDNET_DOWNLOAD_PROMPT_TIMEOUT,
+        default='y'
+    )
+    
+    if response in ['y', 'yes', '']:
+        return download_birdnet_model()
+    else:
+        logger.warning("Download cancelled by user")
+        logger.info("You can download later by running:")
+        logger.info("  birdnet-walker --auto-download /path/to/input")
+        return False
 
 def signal_handler(signum, frame):
     """Handle Ctrl+C and other termination signals."""
@@ -456,6 +590,16 @@ def main():
         metavar="CODE",
         help=f"Language code for species names (default: {DEFAULT_LANGUAGE}). {langs_text}"
     )
+    parser.add_argument(
+        "--auto-download",
+        action="store_true",
+        help="Automatically download BirdNET model if missing (no prompt)"
+    )
+    parser.add_argument(
+        "--no-auto-download",
+        action="store_true",
+        help="Never auto-download BirdNET model (exit if missing)"
+    )
     
     args = parser.parse_args()
     
@@ -483,12 +627,15 @@ def main():
     model_path = Path.home() / ".local/share/birdnet/acoustic-models/v2.4/pb/model-fp32"
 
     if not model_path.exists() or not (model_path / "saved_model.pb").exists():
-        logger.error("BirdNET model not found!")
-        logger.error("")
-        logger.error("Please run the setup script first:")
-        logger.error("  python setup_birdnet.py")
-        logger.error("")
-        return 1
+        # Model not found - try to download
+        logger.info("")
+        if not setup_model_with_prompt(args.auto_download, args.no_auto_download):
+            return 1
+        
+        # Verify download was successful
+        if not model_path.exists() or not (model_path / "saved_model.pb").exists():
+            logger.error("Model download completed but model files not found")
+            return 1
 
     logger.info("BirdNET model found ✓")
     
@@ -575,5 +722,4 @@ def main():
 
 
 if __name__ == "__main__":
-    import sys
     sys.exit(main())
