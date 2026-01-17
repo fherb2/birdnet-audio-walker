@@ -2,7 +2,7 @@
     // The name of the container created by VSCode with this configuration:
     "name": "birdnet_walker",
     // The image to create the container:
-    "image": "registry.hzdr.de/fwf/libraries/dockerfiles/devcontainers-python-cuda-imageprocessing/birdnet_x86-64_ubuntu24.04_py3.12_cuda12.8.0-run:rel-1.6.0-834ce9",
+    "image": "registry.hzdr.de/fwf/libraries/dockerfiles/devcontainers-python-cuda-imageprocessing/birdnet_x86-64_ubuntu24.04_py3.12_poet_jp4_cuda12.8.0-run:rel-1.7.0-e6a661",
 
     // see: https://code.visualstudio.com/remote/advancedcontainers/start-processes
     // -> "When referencing a Dockerfile in devcontainer.json, the default entrypoint

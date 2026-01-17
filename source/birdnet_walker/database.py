@@ -115,12 +115,13 @@ def insert_metadata(db_path: str, metadata: dict):
             metadata.get('gain'),
             metadata.get('firmware')
         ))
-        conn.commit()
         # Set initial processing status to pending
         cursor.execute("""
             INSERT OR IGNORE INTO processing_status (filename, status)
             VALUES (?, 'pending')
         """, (metadata['filename'],))
+        
+        conn.commit()
         logger.debug(f"Metadata inserted for {metadata['filename']}")
     except Exception as e:
         logger.error(f"Error inserting metadata for {metadata['filename']}: {e}")
@@ -375,9 +376,10 @@ def cleanup_incomplete_files(db_path: str):
     
     try:
         # Find files that were being processed but not completed
+        # Note: 'pending' files were never started, so no cleanup needed
         cursor.execute("""
             SELECT filename FROM processing_status
-            WHERE status != 'completed'
+            WHERE status IN ('processing', 'failed')
         """)
         
         incomplete_files = [row[0] for row in cursor.fetchall()]
@@ -403,6 +405,9 @@ def cleanup_incomplete_files(db_path: str):
             
             conn.commit()
             logger.info(f"Cleanup complete: {len(incomplete_files)} files reset to pending")
+            
+            # Vacuum to reclaim space
+            vacuum_database(db_path)
         else:
             logger.info("No incomplete files found, no cleanup needed")
             
@@ -494,6 +499,11 @@ def drop_all_indices(db_path: str):
         conn.commit()
         logger.info("All indices dropped")
         
+        # Vacuum to reclaim space after dropping indices
+        conn.close()  # Close connection before vacuum
+        vacuum_database(db_path)
+        return  # Return early to skip the finally close
+        
     except Exception as e:
         logger.error(f"Error dropping indices: {e}")
     finally:
@@ -529,5 +539,28 @@ def get_missing_files(db_path: str, wav_files: list[str]) -> list[str]:
         
         return missing
         
+    finally:
+        conn.close()
+        
+
+def vacuum_database(db_path: str):
+    """
+    Vacuum database to reclaim space after deletions.
+    
+    Args:
+        db_path: Path to SQLite database
+    """
+    logger.info("Vacuuming database to reclaim space...")
+    
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("VACUUM")
+        conn.commit()
+        logger.info("Database vacuumed ✓")
+        
+    except Exception as e:
+        logger.error(f"Error vacuuming database: {e}")
     finally:
         conn.close()
