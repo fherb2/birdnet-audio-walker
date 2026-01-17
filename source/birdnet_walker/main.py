@@ -21,20 +21,23 @@ from loguru import logger
 import warnings
 warnings.filterwarnings('ignore', category=FutureWarning)
 
-from config import (
+from .config import (
     DEFAULT_CONFIDENCE,
     QUEUE_SIZE,
-    SLEEP_INTERVAL
+    SLEEP_INTERVAL,
+    DEFAULT_LANGUAGE,
+    BIRDNET_LABELS_PATH
 )
-from audiomoth_import import extract_metadata
-from species_translation import download_species_table
-from database import (
+from .audiomoth_import import extract_metadata
+from .species_translation import download_species_table
+from .birdnet_labels import get_available_languages, load_birdnet_labels
+from .database import (
     init_database, insert_metadata, db_writer_process, create_indices,
     cleanup_incomplete_files, get_completed_files, set_file_status,
     get_missing_files, check_indices_exist, drop_all_indices
 )
-from birdnet_analyzer import load_model, analyze_file
-from progress import ProgressDisplay
+from .birdnet_analyzer import load_model, analyze_file
+from .progress import ProgressDisplay
 
 
 # Global references for signal handler
@@ -398,6 +401,16 @@ def main():
     """Main program entry point."""
     global _shutdown_requested
     global _db_writer_process
+    
+    # Try to get available languages for help text
+    try:
+        if BIRDNET_LABELS_PATH.exists():
+            available_langs = get_available_languages()
+            langs_text = f"Available: {', '.join(available_langs)}"
+        else:
+            langs_text = "Available languages will be shown after BirdNET installation"
+    except Exception:
+        langs_text = "Available languages will be shown after BirdNET installation"
 
     # Setup logging
     logger.add(
@@ -441,8 +454,7 @@ def main():
         type=str,
         default=DEFAULT_LANGUAGE,
         metavar="CODE",
-        help=f"Language code for species names (default: {DEFAULT_LANGUAGE}). "
-             f"Available: will be shown after checking BirdNET installation"
+        help=f"Language code for species names (default: {DEFAULT_LANGUAGE}). {langs_text}"
     )
     
     args = parser.parse_args()
@@ -489,8 +501,11 @@ def main():
         logger.error("")
         return 1
     
-    # Get available languages
-    available_languages = get_available_languages()
+    # Get available languages (might be already loaded for help text)
+    try:
+        available_languages = available_langs if 'available_langs' in locals() and available_langs else get_available_languages()
+    except Exception:
+        available_languages = get_available_languages()
     
     if not available_languages:
         logger.error("No language files found in BirdNET labels directory")
@@ -560,4 +575,5 @@ def main():
 
 
 if __name__ == "__main__":
-    exit(main())
+    import sys
+    sys.exit(main())

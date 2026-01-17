@@ -7,7 +7,7 @@ from datetime import datetime
 from loguru import logger
 import birdnet
 
-from config import (
+from .config import (
     DEVICE,
     OVERLAP_DURATION_S,
     BATCH_SIZE,

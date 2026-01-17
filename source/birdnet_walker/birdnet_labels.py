@@ -5,7 +5,7 @@ Loads species names in different languages from BirdNET label files.
 
 from pathlib import Path
 from loguru import logger
-from config import BIRDNET_LABELS_PATH
+from .config import BIRDNET_LABELS_PATH
 
 
 def get_available_languages() -> list[str]:

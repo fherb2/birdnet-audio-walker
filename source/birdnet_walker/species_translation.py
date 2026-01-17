@@ -9,7 +9,7 @@ import pandas as pd
 from pathlib import Path
 from datetime import datetime, timedelta
 from loguru import logger
-from config import SPECIES_CACHE_DIR, SPECIES_CACHE_MAX_AGE_DAYS, SPECIES_TABLE_URL
+from .config import SPECIES_CACHE_DIR, SPECIES_CACHE_MAX_AGE_DAYS, SPECIES_TABLE_URL
 
 
 def download_species_table(cache_dir: str = SPECIES_CACHE_DIR) -> pd.DataFrame:
@@ -111,28 +111,25 @@ def translate_species_name(
         birdnet_labels: BirdNET labels dict for selected language
         
     Returns:
-        dict with keys: 'scientific', 'en', 'local', 'cs'
+        dict with keys: 'scientific', 'local', 'cs'
         Missing translations are filled with scientific name
     """
     # Get local name from BirdNET labels
     local_name = birdnet_labels.get(scientific_name, scientific_name)
     
-    # Get English and Czech from web translation table
+    # Get Czech from web translation table
     match = translation_table[translation_table['scientific'] == scientific_name]
     
     if not match.empty:
         row = match.iloc[0]
-        en_name = row['en']
         cs_name = row['cs']
     else:
         # Not found in web table - use scientific name as fallback
         logger.debug(f"Species not found in web translation table: {scientific_name}")
-        en_name = scientific_name
         cs_name = scientific_name
     
     return {
         'scientific': scientific_name,
-        'en': en_name,
         'local': local_name,
         'cs': cs_name
     }

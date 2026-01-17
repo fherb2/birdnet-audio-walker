@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "birdnet-walker"
+version = "0.1.0"
+description = "BirdNET CUDA Batch Analyzer and tools - Analyze recordings with BirdNET"
+authors = ["Frank Herbrand <herbrand@gmx.de>"]
+readme = "README.md"
+packages = [{include = "birdnet_walker", from = "source"}]
+
+[tool.poetry.dependencies]
+python = ">=3.12,<3.14"
+loguru = "^0.7.0"
+pandas = "^2.0.0"
+requests = "^2.32.0"
+beautifulsoup4 = "^4.14.0"
+birdnet = "^0.2.0"
+# Note: We use a docker image what should include most of them.
+
+[tool.poetry.scripts]
+birdnet-walker = "birdnet_walker.main:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
