@@ -58,7 +58,7 @@ def init_database(db_path: str):
             timezone TEXT NOT NULL,
             scientific_name TEXT NOT NULL,
             name_en TEXT,
-            name_de TEXT,
+            local_name TEXT,
             name_cs TEXT,
             confidence REAL NOT NULL,
             FOREIGN KEY (filename) REFERENCES metadata(filename)
@@ -136,7 +136,8 @@ def batch_insert_detections(
     filename: str,
     metadata: dict,
     detections: list[dict],
-    translation_table: pd.DataFrame
+    translation_table: pd.DataFrame,
+    birdnet_labels: dict
 ):
     """
     Insert all detections from one file in a single transaction.
@@ -162,7 +163,8 @@ def batch_insert_detections(
             # Translate species names
             names = translate_species_name(
                 detection['scientific_name'],
-                translation_table
+                translation_table,
+                birdnet_labels
             )
             
             # Calculate absolute timestamps from detection times
@@ -179,7 +181,7 @@ def batch_insert_detections(
                 INSERT INTO detections 
                 (filename, segment_start_utc, segment_start_local, 
                  segment_end_utc, segment_end_local, timezone,
-                 scientific_name, name_en, name_de, name_cs, confidence)
+                 scientific_name, name_en, local_name, name_cs, confidence)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 filename,
@@ -190,7 +192,7 @@ def batch_insert_detections(
                 metadata['timezone'],
                 names['scientific'],
                 names['en'],
-                names['de'],
+                names['local'],
                 names['cs'],
                 detection['confidence']
             ))
@@ -217,7 +219,8 @@ def batch_insert_detections(
 def db_writer_process(
     result_queue,
     db_path: str,
-    translation_table: pd.DataFrame
+    translation_table: pd.DataFrame,
+    birdnet_labels: dict
 ):
     """
     DB writer process - reads from queue and writes to database.
@@ -253,7 +256,8 @@ def db_writer_process(
                 filename,
                 metadata,
                 detections,
-                translation_table
+                translation_table,
+                birdnet_labels
             )
             
             files_processed += 1

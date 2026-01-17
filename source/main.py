@@ -140,7 +140,7 @@ def process_folder(
     confidence: float,
     no_index: bool,
     translation_table,
-    model
+    birdnet_labels: dict
 ) -> tuple[int, int]:
     """
     Process all WAV files in a single folder.
@@ -221,9 +221,6 @@ def process_folder(
     
     logger.info(f"Files to process: {len(files_to_process)}")
     
-    # Track if we added new data (for index management)
-    added_new_data = False
-    
     # Setup multiprocessing queue
     result_queue = multiprocessing.Queue(maxsize=QUEUE_SIZE)
     
@@ -231,7 +228,7 @@ def process_folder(
     logger.info("Starting database writer process...")
     db_writer = multiprocessing.Process(
         target=db_writer_process,
-        args=(result_queue, str(db_path), translation_table),
+        args=(result_queue, str(db_path), translation_table, birdnet_labels),
         name="DB-Writer"
     )
     db_writer.start()
@@ -328,7 +325,6 @@ def process_folder(
                         time.sleep(SLEEP_INTERVAL)
                 
                 completed += 1
-                added_new_data = True
                 
                 # Update progress
                 elapsed = time.time() - start_time
@@ -440,10 +436,18 @@ def main():
         action="store_true",
         help="Do not create time-based index (or remove existing one if data added)"
     )
+    parser.add_argument(
+        "--lang", "-l",
+        type=str,
+        default=DEFAULT_LANGUAGE,
+        metavar="CODE",
+        help=f"Language code for species names (default: {DEFAULT_LANGUAGE}). "
+             f"Available: will be shown after checking BirdNET installation"
+    )
     
     args = parser.parse_args()
     
-# Validate input folder
+    # Validate input folder
     input_folder = Path(args.input_folder)
     if not input_folder.exists():
         logger.error(f"Input folder does not exist: {input_folder}")
@@ -476,13 +480,44 @@ def main():
 
     logger.info("BirdNET model found ✓")
     
+    # Check if labels directory exists
+    if not BIRDNET_LABELS_PATH.exists():
+        logger.error(f"BirdNET labels directory not found: {BIRDNET_LABELS_PATH}")
+        logger.error("")
+        logger.error("Please run the setup script first:")
+        logger.error("  python setup_birdnet.py")
+        logger.error("")
+        return 1
+    
+    # Get available languages
+    available_languages = get_available_languages()
+    
+    if not available_languages:
+        logger.error("No language files found in BirdNET labels directory")
+        return 1
+    
+    logger.info(f"Available languages: {', '.join(available_languages)}")
+    
+    # Validate selected language
+    if args.lang not in available_languages:
+        logger.error(f"Language '{args.lang}' not available")
+        logger.error(f"Available languages: {', '.join(available_languages)}")
+        return 1
+    
+    logger.info(f"Selected language: {args.lang}")
+    
+    # Load BirdNET labels for selected language
+    logger.info(f"Loading BirdNET labels for language '{args.lang}'...")
+    birdnet_labels = load_birdnet_labels(args.lang)
+    
+    if not birdnet_labels:
+        logger.error(f"Failed to load BirdNET labels for language '{args.lang}'")
+        return 1
+    
+    logger.info(f"Loaded {len(birdnet_labels)} species names in '{args.lang}'")
+    
     # Setup multiprocessing
     multiprocessing.set_start_method('spawn', force=True)
-    
-    # Load BirdNET model (once for entire run)
-    logger.info("Loading BirdNET model...")
-    model = load_model()
-    logger.info("BirdNET model loaded ✓")
     
     # Process each folder
     total_files_processed = 0
@@ -498,7 +533,7 @@ def main():
                 args.confidence,
                 args.no_index,
                 translation_table,
-                model
+                birdnet_labels
             )
             
             total_files_processed += files_processed
