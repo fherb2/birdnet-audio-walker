@@ -64,7 +64,19 @@ def init_database(db_path: str):
             FOREIGN KEY (filename) REFERENCES metadata(filename)
         )
     """)
-    
+
+        # Processing status tracking table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS processing_status (
+            filename TEXT PRIMARY KEY,
+            status TEXT NOT NULL,
+            started_at TEXT,
+            completed_at TEXT,
+            error_message TEXT,
+            FOREIGN KEY (filename) REFERENCES metadata(filename)
+        )
+    """)
+
     conn.commit()
     conn.close()
     logger.info(f"Database initialized: {db_path}")
@@ -106,6 +118,11 @@ def insert_metadata(db_path: str, metadata: dict):
             metadata.get('firmware')
         ))
         conn.commit()
+        # Set initial processing status to pending
+        cursor.execute("""
+            INSERT OR IGNORE INTO processing_status (filename, status)
+            VALUES (?, 'pending')
+        """, (metadata['filename'],))
         logger.debug(f"Metadata inserted for {metadata['filename']}")
     except Exception as e:
         logger.error(f"Error inserting metadata for {metadata['filename']}: {e}")
@@ -180,6 +197,14 @@ def batch_insert_detections(
         
         # Commit transaction
         conn.commit()
+        
+        # Mark file as completed
+        cursor.execute("""
+            UPDATE processing_status 
+            SET status = 'completed', completed_at = ?
+            WHERE filename = ?
+        """, (datetime.now().isoformat(), filename))
+
         logger.debug(f"Batch inserted {len(detections)} detections for {filename}")
         
     except Exception as e:
@@ -254,9 +279,9 @@ def create_indices(db_path: str):
     cursor = conn.cursor()
     
     try:
-        # Index for time-based queries
+        # Index for time-based queries (segment start times)
         cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_detections_time 
+            CREATE INDEX IF NOT EXISTS idx_detections_segment_start
             ON detections(segment_start_local)
         """)
         
@@ -277,5 +302,231 @@ def create_indices(db_path: str):
         
     except Exception as e:
         logger.error(f"Error creating indices: {e}")
+    finally:
+        conn.close()
+
+
+def set_file_status(
+    db_path: str,
+    filename: str,
+    status: str,
+    error_message: str = None
+):
+    """
+    Set processing status for a file.
+    
+    Args:
+        db_path: Path to SQLite database
+        filename: Filename to update
+        status: One of 'pending', 'processing', 'completed', 'failed'
+        error_message: Optional error message for 'failed' status
+    """
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    try:
+        now = datetime.now().isoformat()
+        
+        if status == 'processing':
+            cursor.execute("""
+                INSERT OR REPLACE INTO processing_status 
+                (filename, status, started_at, completed_at, error_message)
+                VALUES (?, ?, ?, NULL, NULL)
+            """, (filename, status, now))
+        elif status == 'completed':
+            cursor.execute("""
+                UPDATE processing_status 
+                SET status = ?, completed_at = ?
+                WHERE filename = ?
+            """, (status, now, filename))
+        elif status == 'failed':
+            cursor.execute("""
+                UPDATE processing_status 
+                SET status = ?, error_message = ?
+                WHERE filename = ?
+            """, (status, error_message, filename))
+        else:  # 'pending'
+            cursor.execute("""
+                INSERT OR REPLACE INTO processing_status 
+                (filename, status, started_at, completed_at, error_message)
+                VALUES (?, ?, NULL, NULL, NULL)
+            """, (filename, status))
+        
+        conn.commit()
+    except Exception as e:
+        logger.error(f"Error setting status for {filename}: {e}")
+        conn.rollback()
+    finally:
+        conn.close()
+
+
+def cleanup_incomplete_files(db_path: str):
+    """
+    Cleanup incomplete file processing:
+    - Delete detections from files that were 'processing' but not completed
+    - Reset their status to 'pending'
+    
+    Args:
+        db_path: Path to SQLite database
+    """
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    try:
+        # Find files that were being processed but not completed
+        cursor.execute("""
+            SELECT filename FROM processing_status
+            WHERE status != 'completed'
+        """)
+        
+        incomplete_files = [row[0] for row in cursor.fetchall()]
+        
+        if incomplete_files:
+            logger.info(f"Found {len(incomplete_files)} incomplete files, cleaning up...")
+            
+            for filename in incomplete_files:
+                # Delete detections
+                cursor.execute("""
+                    DELETE FROM detections WHERE filename = ?
+                """, (filename,))
+                
+                # Reset status to pending
+                cursor.execute("""
+                    UPDATE processing_status 
+                    SET status = 'pending', started_at = NULL, 
+                        completed_at = NULL, error_message = NULL
+                    WHERE filename = ?
+                """, (filename,))
+                
+                logger.debug(f"Cleaned up incomplete file: {filename}")
+            
+            conn.commit()
+            logger.info(f"Cleanup complete: {len(incomplete_files)} files reset to pending")
+        else:
+            logger.info("No incomplete files found, no cleanup needed")
+            
+    except Exception as e:
+        logger.error(f"Error during cleanup: {e}")
+        conn.rollback()
+    finally:
+        conn.close()
+
+
+def get_completed_files(db_path: str) -> set[str]:
+    """
+    Get set of filenames that have been successfully processed.
+    
+    Args:
+        db_path: Path to SQLite database
+        
+    Returns:
+        Set of filenames with status 'completed'
+    """
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("""
+            SELECT filename FROM processing_status
+            WHERE status = 'completed'
+        """)
+        
+        completed = {row[0] for row in cursor.fetchall()}
+        logger.info(f"Found {len(completed)} already completed files")
+        return completed
+        
+    except Exception as e:
+        logger.error(f"Error getting completed files: {e}")
+        return set()
+    finally:
+        conn.close()
+
+
+def check_indices_exist(db_path: str) -> bool:
+    """
+    Check if any of the indices exist.
+    
+    Args:
+        db_path: Path to SQLite database
+        
+    Returns:
+        True if any index exists, False otherwise
+    """
+    from config import INDEX_NAMES
+    
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    try:
+        for index_name in INDEX_NAMES:
+            cursor.execute("""
+                SELECT name FROM sqlite_master 
+                WHERE type='index' AND name=?
+            """, (index_name,))
+            
+            if cursor.fetchone() is not None:
+                return True
+        
+        return False
+        
+    finally:
+        conn.close()
+
+
+def drop_all_indices(db_path: str):
+    """
+    Drop all custom indices.
+    
+    Args:
+        db_path: Path to SQLite database
+    """
+    from config import INDEX_NAMES
+    
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    try:
+        for index_name in INDEX_NAMES:
+            cursor.execute(f"DROP INDEX IF EXISTS {index_name}")
+            logger.debug(f"Dropped index: {index_name}")
+        
+        conn.commit()
+        logger.info("All indices dropped")
+        
+    except Exception as e:
+        logger.error(f"Error dropping indices: {e}")
+    finally:
+        conn.close()
+
+
+
+
+def get_missing_files(db_path: str, wav_files: list[str]) -> list[str]:
+    """
+    Get list of WAV files that are not yet in the database.
+    
+    Args:
+        db_path: Path to SQLite database
+        wav_files: List of WAV filenames in the folder
+        
+    Returns:
+        List of filenames not yet in database
+    """
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    try:
+        # Get all filenames in metadata table
+        cursor.execute("SELECT filename FROM metadata")
+        existing_files = {row[0] for row in cursor.fetchall()}
+        
+        # Find missing files
+        missing = [f for f in wav_files if f not in existing_files]
+        
+        if missing:
+            logger.info(f"Found {len(missing)} new files not yet in database")
+        
+        return missing
+        
     finally:
         conn.close()

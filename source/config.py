@@ -24,3 +24,10 @@ DEFAULT_CONFIDENCE = 0.09     # Default minimum confidence threshold
 SPECIES_CACHE_DIR = "/tmp"
 SPECIES_CACHE_MAX_AGE_DAYS = 7
 SPECIES_TABLE_URL = "https://www.karlincam.cz/de_de/und-sonst-noch/artennamen-uebersetzen/vogelnamen-wissenschaftlich-sortiert"
+
+# Index Management
+INDEX_NAMES = [
+    "idx_detections_segment_start",  # Time-based index
+    "idx_detections_species",         # Species-based index
+    "idx_detections_filename"         # Filename-based index
+]
