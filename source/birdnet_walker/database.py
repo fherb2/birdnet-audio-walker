@@ -3,12 +3,11 @@ SQLite database management for BirdNET Batch Analyzer.
 """
 
 import sqlite3
-from pathlib import Path
 from datetime import datetime, timedelta
 from loguru import logger
 import pandas as pd
 
-from species_translation import translate_species_name
+from .species_translation import translate_species_name
 
 
 def init_database(db_path: str):
@@ -57,7 +56,6 @@ def init_database(db_path: str):
             segment_end_local TEXT NOT NULL,
             timezone TEXT NOT NULL,
             scientific_name TEXT NOT NULL,
-            name_en TEXT,
             local_name TEXT,
             name_cs TEXT,
             confidence REAL NOT NULL,
@@ -181,8 +179,8 @@ def batch_insert_detections(
                 INSERT INTO detections 
                 (filename, segment_start_utc, segment_start_local, 
                  segment_end_utc, segment_end_local, timezone,
-                 scientific_name, name_en, local_name, name_cs, confidence)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 scientific_name, local_name, name_cs, confidence)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 filename,
                 detection_start_utc.isoformat(),
@@ -191,7 +189,6 @@ def batch_insert_detections(
                 detection_end_local.isoformat(),
                 metadata['timezone'],
                 names['scientific'],
-                names['en'],
                 names['local'],
                 names['cs'],
                 detection['confidence']
