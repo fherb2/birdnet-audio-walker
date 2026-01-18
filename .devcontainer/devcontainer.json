@@ -38,7 +38,7 @@
             // different user, this behaviour may differ).
             "source=${localEnv:HOME},target=/home/hostuser,type=bind,consistency=cached",
             "source=/volume1/massdata/backup_less/herbrand,target=/home/hostuser/massdata,type=bind,consistency=cached",
-            "source=/run/user/${localEnv:UID}/pulse,target=/run/user/1000/pulse,type=bind",
+            "source=/run/user/1010/pulse,target=/run/user/1010/pulse,type=bind" // noch herausfinden, wie man diese UID automatisch ermittelt. Händisch: Auf dem Host: echo $XDG_RUNTIME_DIR
         ],
 
     // Arguments for starting the container
