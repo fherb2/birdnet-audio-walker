@@ -63,7 +63,7 @@ def init_database(db_path: str):
         )
     """)
 
-        # Processing status tracking table
+    # Processing status tracking table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS processing_status (
             filename TEXT PRIMARY KEY,
@@ -72,6 +72,14 @@ def init_database(db_path: str):
             completed_at TEXT,
             error_message TEXT,
             FOREIGN KEY (filename) REFERENCES metadata(filename)
+        )
+    """)
+    
+    # Analysis config table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS analysis_config (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
         )
     """)
 
