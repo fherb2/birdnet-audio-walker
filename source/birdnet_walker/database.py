@@ -205,6 +205,8 @@ def batch_insert_detections(
             WHERE filename = ?
         """, (datetime.now().isoformat(), filename))
 
+        conn.commit()
+
         logger.debug(f"Batch inserted {len(detections)} detections for {filename}")
         
     except Exception as e:
