@@ -39,7 +39,7 @@ from .birdnet_labels import get_available_languages, load_birdnet_labels
 from .database import (
     init_database, insert_metadata, db_writer_process, create_indices,
     cleanup_incomplete_files, get_completed_files, set_file_status,
-    get_missing_files, check_indices_exist, drop_all_indices
+    get_missing_files, check_indices_exist, drop_all_indices, repair_orphaned_metadata
 )
 from .birdnet_analyzer import load_model, analyze_file
 from .progress import ProgressDisplay
@@ -339,6 +339,9 @@ def process_folder(
         for metadata in metadata_list:
             insert_metadata(db_path, metadata)
     
+    # Repair orphaned files (in metadata but not in processing_status)
+    repair_orphaned_metadata(str(db_path))
+    
     # Cleanup incomplete files from previous runs
     logger.info("Checking for incomplete files from previous runs...")
     cleanup_incomplete_files(str(db_path))
@@ -349,8 +352,8 @@ def process_folder(
     if completed_files:
         logger.info(f"Found {len(completed_files)} already completed files")
     
-    # After cleanup, we need to process all files that are 'pending'
-    # This includes both new files AND files that were cleaned up
+    # After cleanup, process only files with status 'pending'
+    # NOT the completed ones!
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     cursor.execute("""
@@ -360,10 +363,10 @@ def process_folder(
     pending_filenames = {row[0] for row in cursor.fetchall()}
     conn.close()
     
-    # Get metadata for all pending files
+    # Match pending files with metadata from metadata_list
     files_to_process = [m for m in metadata_list if m['filename'] in pending_filenames]
     
-    # For files in pending but not in metadata_list (they existed before), load metadata
+    # For pending files not in metadata_list (were incomplete), load metadata
     missing_from_list = pending_filenames - {m['filename'] for m in metadata_list}
     if missing_from_list:
         logger.info(f"Loading metadata for {len(missing_from_list)} previously incomplete files...")

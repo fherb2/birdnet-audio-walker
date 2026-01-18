@@ -418,6 +418,45 @@ def cleanup_incomplete_files(db_path: str):
         conn.close()
 
 
+def repair_orphaned_metadata(db_path: str):
+    """
+    Find files in metadata that are missing from processing_status and add them.
+    
+    This can happen if the program was interrupted during insert_metadata().
+    
+    Args:
+        db_path: Path to SQLite database
+    """
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    try:
+        # Find files in metadata but not in processing_status
+        cursor.execute("""
+            SELECT filename FROM metadata
+            WHERE filename NOT IN (SELECT filename FROM processing_status)
+        """)
+        
+        orphaned = [row[0] for row in cursor.fetchall()]
+        
+        if orphaned:
+            logger.warning(f"Found {len(orphaned)} files in metadata without processing status, repairing...")
+            
+            for filename in orphaned:
+                cursor.execute("""
+                    INSERT INTO processing_status (filename, status)
+                    VALUES (?, 'pending')
+                """, (filename,))
+            
+            conn.commit()
+            logger.info(f"Repaired {len(orphaned)} orphaned files")
+        
+    except Exception as e:
+        logger.error(f"Error repairing orphaned metadata: {e}")
+        conn.rollback()
+    finally:
+        conn.close()
+
 def get_completed_files(db_path: str) -> set[str]:
     """
     Get set of filenames that have been successfully processed.
