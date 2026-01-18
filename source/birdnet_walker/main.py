@@ -277,7 +277,8 @@ def process_folder(
     confidence: float,
     no_index: bool,
     translation_table,
-    birdnet_labels: dict
+    birdnet_labels: dict,
+    lang_shortcut:str
 ) -> tuple[int, int]:
     """
     Process all WAV files in a single folder.
@@ -314,6 +315,16 @@ def process_folder(
     # Initialize database if needed
     if not db_existed:
         init_database(str(db_path))
+        
+    # Store analysis language in database
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT OR REPLACE INTO analysis_config (key, value)
+        VALUES ('local_name_shortcut', ?)
+    """, (lang_shortcut,))
+    conn.commit()
+    conn.close()
     
     # Get list of files already in database
     filenames_in_folder = [f.name for f in wav_files]
@@ -722,7 +733,8 @@ def main():
                 args.confidence,
                 args.no_index,
                 translation_table,
-                birdnet_labels
+                birdnet_labels,
+                args.lang
             )
             
             total_files_processed += files_processed
