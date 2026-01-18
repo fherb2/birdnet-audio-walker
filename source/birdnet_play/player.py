@@ -251,6 +251,103 @@ class AudioPlayer:
         buf.seek(0)
         
         return buf
+    
+    def _to_mp3_bytes(self, audio_data: np.ndarray, sample_rate: int) -> BytesIO:
+        """
+        Convert numpy array to MP3 in BytesIO (for web streaming).
+        
+        Args:
+            audio_data: Audio samples (int16, mono)
+            sample_rate: Sample rate in Hz
+            
+        Returns:
+            BytesIO with MP3 data
+        """
+        # Convert to pydub AudioSegment
+        audio_segment = AudioSegment(
+            audio_data.tobytes(),
+            frame_rate=sample_rate,
+            sample_width=audio_data.dtype.itemsize,
+            channels=1
+        )
+        
+        # Export to MP3 in memory (128kbps quality)
+        buf = BytesIO()
+        audio_segment.export(buf, format='mp3', bitrate='128k')
+        buf.seek(0)
+        
+        return buf
+    
+    def prepare_detection_audio_web(
+        self,
+        detection: Dict,
+        language_code: str,
+        filter_context: Dict,
+        use_sci: bool = False,
+        disable_tts: bool = False
+    ) -> BytesIO:
+        """
+        Create combined audio as MP3 (for web streaming).
+        
+        Same as prepare_detection_audio() but returns MP3 instead of WAV.
+        Much smaller file size for web transfer.
+        
+        Args:
+            detection: Detection dict from query_detections()
+            language_code: Language code for TTS
+            filter_context: Filter context dict
+            use_sci: Use scientific names
+            
+        Returns:
+            BytesIO with MP3 data
+        """
+        logger.debug(f"Preparing MP3 audio for detection #{detection['detection_id']}")
+        
+        # 1. Generate 1s pause (silence)
+        pause = self._generate_silence(1.0, 48000)
+        
+        # 2. Extract audio snippet with PM buffer
+        wav_path = self.db_dir / detection['filename']
+        
+        try:
+            start_offset, end_offset = calculate_snippet_offsets(detection, self.pm_seconds)
+            audio_data, sample_rate = extract_snippet(wav_path, start_offset, end_offset)
+        except Exception as e:
+            logger.error(f"Failed to extract snippet for detection #{detection['detection_id']}: {e}")
+            raise
+        
+        # 3. Generate TTS announcement (nur wenn nicht disabled)
+        if not disable_tts:
+            tts_text = self._get_announcement_text(detection, filter_context, use_sci)
+            
+            try:
+                # WICHTIG: Bei wissenschaftlichen Namen IMMER deutsche Stimme!
+                tts_lang = 'de' if use_sci else language_code
+                tts_audio = generate_tts(tts_text, tts_lang, use_sci=False)
+            except Exception as e:
+                logger.warning(f"TTS generation failed, using silence: {e}")
+                tts_audio = self._generate_silence(1.0, 48000)
+        else:
+            # TTS disabled - nur kurze Pause statt Ansage
+            tts_audio = self._generate_silence(0.5, 48000)
+        
+        # 4. Combine: Pause + Audio + TTS
+        audio_resampled = self._resample_if_needed(audio_data, sample_rate, 48000)
+        
+        combined = self._combine_audio_segments(
+            [pause, audio_resampled, tts_audio],
+            48000
+        )
+        
+        # 5. Convert to MP3 instead of WAV
+        mp3_bytes = self._to_mp3_bytes(combined, 48000)
+        
+        logger.debug(
+            f"MP3 prepared: detection #{detection['detection_id']}, "
+            f"size ~{len(mp3_bytes.getvalue())/1024:.1f}KB"
+        )
+        
+        return mp3_bytes
 
 
 def export_detections(
@@ -260,7 +357,8 @@ def export_detections(
     language_code: str,
     filter_context: Dict,
     pm_seconds: float = 1.0,
-    use_sci: bool = False
+    use_sci: bool = False,
+    disable_tts: bool = False
 ):
     """
     Export detections as individual WAV files.
@@ -282,6 +380,8 @@ def export_detections(
     for i, detection in enumerate(detections, 1):
         try:
             # Generate audio
+            # Note: WAV export uses the non-web version (WAV instead of MP3)
+            # We need to add disable_tts support here too
             audio_bytes = player.prepare_detection_audio(
                 detection,
                 language_code,
@@ -306,3 +406,61 @@ def export_detections(
             logger.error(f"Failed to export detection #{detection['detection_id']}: {e}")
     
     logger.info(f"Export complete: {len(detections)} files in {output_dir}")
+    
+
+def export_detections_mp3(
+    db_path: Path,
+    output_dir: Path,
+    detections: List[Dict],
+    language_code: str,
+    filter_context: Dict,
+    pm_seconds: float = 1.0,
+    use_sci: bool = False,
+    disable_tts: bool = False
+):
+    """
+    Export detections as individual MP3 files.
+    
+    Args:
+        db_path: Path to BirdNET database
+        output_dir: Output directory for MP3 files
+        detections: List of detections from query_detections()
+        language_code: Language code for TTS
+        filter_context: Filter context dict
+        pm_seconds: Plus/Minus buffer
+        use_sci: Use scientific names
+        disable_tts: Disable TTS announcements
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    player = AudioPlayer(db_path, pm_seconds)
+    
+    logger.info(f"Exporting {len(detections)} detections as MP3 to {output_dir}")
+    
+    for i, detection in enumerate(detections, 1):
+        try:
+            # Generate audio as MP3
+            audio_bytes = player.prepare_detection_audio_web(
+                detection,
+                language_code,
+                filter_context,
+                use_sci,
+                disable_tts
+            )
+            
+            # Create filename
+            detection_id = detection['detection_id']
+            scientific_safe = detection['scientific_name'].replace(' ', '_')
+            timestamp = detection['segment_start_local'].replace(':', '').replace('-', '').replace(' ', '_')
+            filename = f"{detection_id:06d}_{scientific_safe}_{timestamp}.mp3"
+            
+            # Write file
+            output_path = output_dir / filename
+            with open(output_path, 'wb') as f:
+                f.write(audio_bytes.read())
+            
+            logger.debug(f"[{i}/{len(detections)}] Exported: {filename}")
+            
+        except Exception as e:
+            logger.error(f"Failed to export detection #{detection['detection_id']}: {e}")
+    
+    logger.info(f"MP3 export complete: {len(detections)} files in {output_dir}")

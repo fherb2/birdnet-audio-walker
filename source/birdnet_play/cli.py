@@ -6,8 +6,8 @@ import argparse
 import sys
 import time
 from pathlib import Path
-from datetime import datetime
 from loguru import logger
+import subprocess
 
 import sounddevice as sd
 import soundfile as sf
@@ -264,22 +264,31 @@ Examples:
     args = parser.parse_args()
     
     # Validate database path
-    db_path = Path(args.db_path)
-    if not db_path.exists():
-        logger.error(f"Database not found: {db_path}")
+    input_path = Path(args.db_path)
+    
+    if not input_path.exists():
+        logger.error(f"Path not found: {input_path}")
         return 1
     
     # Start Streamlit UI if requested
     if args.ui:
+        # UI mode: Accept both directory and database file
+        if input_path.is_file() and input_path.name != 'birdnet_analysis.db':
+            logger.error(f"File must be named 'birdnet_analysis.db', got: {input_path.name}")
+            return 1
+        
+        if input_path.is_dir():
+            logger.info(f"Searching for databases in: {input_path}")
+        
+        # Streamlit will handle directory vs. file
         logger.info("Starting Streamlit UI...")
-        import subprocess
-        import os
+
         
         # Get path to streamlit_app.py
         app_path = Path(__file__).parent / "streamlit_app.py"
         
         # Start streamlit
-        cmd = ["streamlit", "run", str(app_path), "--", str(db_path.absolute())]
+        cmd = ["streamlit", "run", str(app_path), "--", str(input_path.absolute())]
         
         try:
             subprocess.run(cmd)
@@ -287,6 +296,18 @@ Examples:
             logger.info("Streamlit stopped")
         
         return 0
+    
+    # CLI/Export mode: Must be a database file
+    if input_path.is_dir():
+        logger.error("CLI mode requires a database file, not a directory")
+        logger.error("Use --ui flag to work with directories")
+        return 1
+    
+    if not input_path.name == 'birdnet_analysis.db':
+        logger.error(f"File must be named 'birdnet_analysis.db', got: {input_path.name}")
+        return 1
+    
+    db_path = input_path
     
     # Load language from database
     language_code = get_analysis_config(db_path, 'local_name_shortcut')
