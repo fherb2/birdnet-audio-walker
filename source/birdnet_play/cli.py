@@ -272,9 +272,21 @@ Examples:
     # Start Streamlit UI if requested
     if args.ui:
         logger.info("Starting Streamlit UI...")
-        # TODO: Import and start Streamlit
-        logger.error("Streamlit UI not yet implemented")
-        return 1
+        import subprocess
+        import os
+        
+        # Get path to streamlit_app.py
+        app_path = Path(__file__).parent / "streamlit_app.py"
+        
+        # Start streamlit
+        cmd = ["streamlit", "run", str(app_path), "--", str(db_path.absolute())]
+        
+        try:
+            subprocess.run(cmd)
+        except KeyboardInterrupt:
+            logger.info("Streamlit stopped")
+        
+        return 0
     
     # Load language from database
     language_code = get_analysis_config(db_path, 'local_name_shortcut')
