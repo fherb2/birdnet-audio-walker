@@ -1,10 +1,8 @@
 """
-Thread-based keyboard input for CLI playback control.
+Thread-based keyboard input for CLI playback control using readchar.
 """
 
 import sys
-import tty
-import termios
 import threading
 import queue
 from typing import Optional
@@ -15,25 +13,20 @@ try:
     READCHAR_AVAILABLE = True
 except ImportError:
     READCHAR_AVAILABLE = False
-    logger.warning("readchar not installed")
+    logger.error("readchar not installed - keyboard control will not work!")
+    logger.error("Install with: poetry add readchar")
 
 
 class KeyboardController:
-    """Thread-based keyboard input handler."""
+    """Thread-based keyboard input handler using readchar."""
     
     def __init__(self):
         """Initialize keyboard controller with input thread."""
+        if not READCHAR_AVAILABLE:
+            raise RuntimeError("readchar not installed - cannot initialize keyboard controller")
+        
         self.key_queue = queue.Queue()
         self.running = True
-        self.old_settings = None
-        
-        # Save and set terminal mode
-        if sys.stdin.isatty():
-            try:
-                self.old_settings = termios.tcgetattr(sys.stdin)
-                tty.setcbreak(sys.stdin.fileno())
-            except Exception as e:
-                logger.warning(f"Could not set terminal mode: {e}")
         
         # Start keyboard input thread
         self.thread = threading.Thread(target=self._input_thread, daemon=True)
@@ -41,57 +34,40 @@ class KeyboardController:
         logger.debug("Keyboard controller started")
     
     def _input_thread(self):
-            """Background thread that reads keyboard input."""
-            while self.running:
-                try:
-                    if not sys.stdin.isatty():
-                        break
+        """Background thread that reads keyboard input using readchar."""
+        while self.running:
+            try:
+                # Blocking read using readchar (handles escape sequences automatically)
+                key = readchar.readkey()
+                
+                # Map to our key names
+                mapped_key = self._map_key(key)
+                if mapped_key:
+                    self.key_queue.put(mapped_key)
                     
-                    # Blocking read (OK in thread)
-                    char = sys.stdin.read(1)
-                    
-                    # Handle escape sequences for arrow keys
-                    if char == '\x1b':
-                        # ESC detected - read rest of sequence
-                        import select
-                        
-                        # Wait up to 100ms for next character
-                        if sys.stdin in select.select([sys.stdin], [], [], 0.1)[0]:
-                            next_char = sys.stdin.read(1)
-                            char += next_char
-                            
-                            # If it's '[', read the final character
-                            if next_char == '[':
-                                if sys.stdin in select.select([sys.stdin], [], [], 0.1)[0]:
-                                    final_char = sys.stdin.read(1)
-                                    char += final_char
-                    
-                    # Map to key name
-                    key = self._map_key(char)
-                    if key:
-                        self.key_queue.put(key)
-                    else:
-                        # Debug: show unmapped sequences
-                        logger.debug(f"Unmapped key sequence: {repr(char)}")
-                        
-                except Exception as e:
-                    if self.running:
-                        logger.debug(f"Input thread error: {e}")
-                    break
+            except Exception as e:
+                if self.running:
+                    logger.debug(f"Input thread error: {e}")
+                break
     
-    def _map_key(self, char: str) -> Optional[str]:
-        """Map raw character(s) to key name."""
+    def _map_key(self, key: str) -> Optional[str]:
+        """Map readchar key to our key names."""
+        # readchar constants for special keys
         key_map = {
-            '\x1b[D': 'left',
-            '\x1b[C': 'right',
-            '\x1b[A': 'up',
-            '\x1b[B': 'down',
+            readchar.key.LEFT: 'left',
+            readchar.key.RIGHT: 'right',
+            readchar.key.UP: 'up',
+            readchar.key.DOWN: 'down',
+            readchar.key.ENTER: 'enter',
+            readchar.key.ESC: 'esc',
+            readchar.key.BACKSPACE: 'backspace',
             ' ': 'space',
             'q': 'q',
             'Q': 'q',
             '\x03': 'ctrl_c',  # Ctrl+C
         }
-        return key_map.get(char, char if len(char) == 1 else None)
+        
+        return key_map.get(key, key if len(key) == 1 else None)
     
     def get_key_nonblocking(self) -> Optional[str]:
         """
@@ -108,20 +84,11 @@ class KeyboardController:
     def stop(self):
         """Stop the keyboard controller."""
         self.running = False
-        self.restore_terminal()
-    
-    def restore_terminal(self):
-        """Restore original terminal settings."""
-        if self.old_settings and sys.stdin.isatty():
-            try:
-                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.old_settings)
-                logger.debug("Terminal settings restored")
-            except Exception as e:
-                logger.warning(f"Could not restore terminal: {e}")
     
     def __del__(self):
         """Cleanup on deletion."""
         self.stop()
+
 
 def test_keyboard():
     """Test keyboard controller."""
@@ -131,7 +98,7 @@ def test_keyboard():
     logger.remove()
     logger.add(sys.stderr, level="DEBUG")
     
-    print("Keyboard Controller Test (Thread-based)")
+    print("Keyboard Controller Test (readchar-based)")
     print("=" * 60)
     print("Press keys:")
     print("  SPACE    - Space bar")
@@ -140,7 +107,11 @@ def test_keyboard():
     print("=" * 60)
     print()
     
-    controller = KeyboardController()
+    try:
+        controller = KeyboardController()
+    except RuntimeError as e:
+        print(f"Error: {e}")
+        return
     
     try:
         print("Waiting for input...\n")
@@ -166,8 +137,6 @@ def test_keyboard():
         print("\nTest interrupted")
     finally:
         controller.stop()
-
-
 
 
 if __name__ == "__main__":
