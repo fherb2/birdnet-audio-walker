@@ -4,7 +4,11 @@ version = "0.1.0"
 description = "BirdNET CUDA Batch Analyzer and tools - Analyze recordings with BirdNET"
 authors = ["Frank Herbrand <herbrand@gmx.de>"]
 readme = "README.md"
-packages = [{include = "birdnet_walker", from = "source"}]
+packages = [
+    { include = "birdnet_walker", from = "source"},
+    { include = "shared", from = "source" },
+    { include = "birdnet_play", from = "source" }
+    ]
 
 [tool.poetry.dependencies]
 python = ">=3.12,<3.14"
@@ -14,9 +18,16 @@ requests = "^2.32.0"
 beautifulsoup4 = "^4.14.0"
 birdnet = "^0.2.0"
 # Note: We use a docker image what should include most of them.
+edge-tts = "^7.2.0"
+pydub = "^0.25.0"
+sounddevice = "^0.5.3"
+soundfile = "^0.13.1"
+readchar = "^4.2.1"
+num2words = "^0.5.14"
 
 [tool.poetry.scripts]
 birdnet-walker = "birdnet_walker.main:main"
+birdnet-play = "birdnet_play.cli:main"
 
 [build-system]
 requires = ["poetry-core"]
