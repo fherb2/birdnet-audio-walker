@@ -54,6 +54,79 @@ def get_analysis_config(db_path: Path, key: str) -> Optional[str]:
         conn.close()
 
 
+def set_analysis_config(db_path: Path, key: str, value: str) -> bool:
+    """
+    Schreibt/aktualisiert Wert in analysis_config Tabelle.
+    
+    Args:
+        db_path: Pfad zur Datenbank
+        key: Config-Key
+        value: Wert zum Speichern
+        
+    Returns:
+        True wenn erfolgreich, False bei Fehler
+    """
+    try:
+        conn = get_db_connection(db_path)
+        
+        # INSERT OR REPLACE (upsert)
+        conn.execute(
+            "INSERT OR REPLACE INTO analysis_config (key, value) VALUES (?, ?)",
+            (key, value)
+        )
+        
+        conn.commit()
+        conn.close()
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"Failed to set analysis_config '{key}': {e}")
+        return False
+
+
+def get_all_metadata(db_path: Path) -> List[Dict]:
+    """
+    Lädt alle File-Metadaten aus der metadata Tabelle.
+    
+    Returns:
+        Liste von Dicts mit allen Metadata-Feldern
+    """
+    try:
+        conn = get_db_connection(db_path)
+        
+        query = """
+            SELECT 
+                filename,
+                timestamp_utc,
+                timestamp_local,
+                timezone,
+                serial,
+                gps_lat,
+                gps_lon,
+                sample_rate,
+                channels,
+                bit_depth,
+                duration_seconds,
+                temperature_c,
+                battery_voltage,
+                gain,
+                firmware
+            FROM metadata
+            ORDER BY timestamp_local ASC
+        """
+        
+        cursor = conn.execute(query)
+        results = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        
+        return results
+        
+    except Exception as e:
+        logger.error(f"Failed to load metadata: {e}")
+        return []
+
+
 def get_detection_by_id(db_path: Path, detection_id: int) -> Optional[Dict]:
     """
     Load single detection with all metadata.
