@@ -54,7 +54,11 @@ def initialize_session_state_from_args():
     if len(sys.argv) < 2:
         st.session_state['db_path'] = None
         st.session_state['root_path'] = None
+        st.session_state['read_only'] = False
         return False
+
+    # Check for read-only flag
+    st.session_state['read_only'] = '--read-only' in sys.argv
     
     input_path = Path(sys.argv[1])
     

@@ -1,5 +1,11 @@
-# birdnet-audio-walker
-Solution for statistical analysis and acoustic evaluation of bird song recordings with birdnet.
+# Birdnet-Audio-Walker
+
+A walker in two senses:
+
+ - Walks through your audio folders and indexes BirdNET bird call recognition in one database per folder.
+ - You can browse through these databases and explore the bird song recognition data.
+
+Solution for statistical analysis and acoustic evaluation of bird song recordings based on BirdNET recognition.
 
 # Project state
 

@@ -261,6 +261,12 @@ Examples:
         help="Export audio snippets as WAV files to directory instead of playing"
     )
     
+    parser.add_argument(
+        "--read-only", "-r",
+        action="store_true",
+        help="Open database in read-only mode (prevents modifications)"
+    )
+    
     args = parser.parse_args()
     
     # Validate database path
@@ -289,6 +295,10 @@ Examples:
         
         # Start streamlit
         cmd = ["streamlit", "run", str(app_path), "--", str(input_path.absolute())]
+
+        # Add read-only flag if set
+        if args.read_only:
+            cmd.append("--read-only")
         
         try:
             subprocess.run(cmd)
@@ -317,6 +327,14 @@ Examples:
     
     logger.info(f"Database language: {language_code}")
     
+    # Create/update species_list table (always in CLI mode for fresh data)
+    from shared.db_queries import create_species_list_table
+    logger.info("Updating species list...")
+    if create_species_list_table(db_path):
+        logger.info("Species list updated successfully")
+    else:    # Build filter
+        logger.warning("Failed to update species list, continuing anyway...")
+    
     # Build filter
     detection_filter = DetectionFilter(
         detection_id=args.detection_id,
@@ -328,7 +346,6 @@ Examples:
         min_confidence=args.min_confidence,
         limit=args.limit,
         offset=args.offset,
-        shuffle=args.shuffle,
         pm_seconds=args.pm,
         use_sci=args.sci
     )
