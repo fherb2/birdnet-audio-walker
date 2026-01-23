@@ -14,6 +14,27 @@ from num2words import num2words
 from shared.audio_extract import extract_snippet, calculate_snippet_offsets
 from .tts import generate_tts
 
+# Additional imports for audio processing
+try:
+    import pyloudnorm as pyln
+    PYLOUDNORM_AVAILABLE = True
+except ImportError:
+    PYLOUDNORM_AVAILABLE = False
+    logger.warning("pyloudnorm not installed, LUFS normalization will be disabled")
+
+try:
+    from pedalboard import Pedalboard, Compressor
+    PEDALBOARD_AVAILABLE = True
+except ImportError:
+    PEDALBOARD_AVAILABLE = False
+    logger.warning("pedalboard not installed, audio compression will be disabled")
+
+
+# Audio processing constants
+TARGET_LUFS = -16.0  # Target loudness in LUFS (-23 = broadcast, -16 = streaming, -14 = loud)
+FADE_DURATION_MS = 500  # Fade-in/out duration in milliseconds (0.5s)
+COMPRESSOR_THRESHOLD_DB = -20.0  # Compressor threshold
+COMPRESSOR_RATIO = 4.0  # Compression ratio (4:1)
 
 class AudioPlayer:
     """Audio player for BirdNET detections."""
@@ -35,21 +56,28 @@ class AudioPlayer:
     def prepare_detection_audio(
         self,
         detection: Dict,
+        audio_number: int,
         language_code: str,
         filter_context: Dict,
-        use_sci: bool = False
+        audio_options: Dict,
+        disable_tts: bool = False
     ) -> BytesIO:
         """
-        Create combined audio: Pause + Snippet + TTS announcement.
+        Create combined audio: Pause + Snippet + TTS announcement (as WAV).
         
         Args:
             detection: Detection dict from query_detections()
-            language_code: Language code for TTS (e.g., 'de', 'en')
-            filter_context: Dict with filter info:
-                - 'species_filter': bool
-                - 'detection_id_given': bool
-                - 'time_filter': bool
-            use_sci: Use scientific names instead of local names
+            audio_number: Sequential number in playlist (1, 2, 3, ...)
+            language_code: Language code for TTS
+            filter_context: Filter context dict
+            audio_options: Audio options dict with:
+                - say_audio_number: bool
+                - say_id: bool
+                - say_confidence: bool
+                - bird_name_option: 'none', 'local', 'scientific'
+                - speech_speed: float (0.5-2.0)
+                - speech_loudness: int (-20 to +20 dB)
+            disable_tts: Disable TTS announcements completely
             
         Returns:
             BytesIO with WAV data ready for playback or export
@@ -65,18 +93,40 @@ class AudioPlayer:
         try:
             start_offset, end_offset = calculate_snippet_offsets(detection, self.pm_seconds)
             audio_data, sample_rate = extract_snippet(wav_path, start_offset, end_offset)
+            
+            # Process audio frame: fade-in/out, LUFS normalization, compression
+            audio_data = self._process_audio_frame(audio_data, sample_rate)
+            
         except Exception as e:
-            logger.error(f"Failed to extract snippet for detection #{detection['detection_id']}: {e}")
+            logger.error(f"Failed to extract/process snippet for detection #{detection['detection_id']}: {e}")
             raise
         
-        # 3. Generate TTS announcement
-        tts_text = self._get_announcement_text(detection, filter_context, use_sci)
-        
-        try:
-            tts_audio = generate_tts(tts_text, language_code, use_sci)
-        except Exception as e:
-            logger.warning(f"TTS generation failed, using silence: {e}")
-            tts_audio = self._generate_silence(1.0, 48000)
+        # 3. Generate TTS announcement (only if not disabled)
+        if not disable_tts:
+            tts_text = self._get_announcement_text(detection, audio_number, filter_context, audio_options)
+            
+            try:
+                # Determine voice language:
+                # - Scientific name -> always German
+                # - Local name -> language_code
+                bird_name_option = audio_options.get('bird_name_option', 'local')
+                if bird_name_option == 'scientific':
+                    tts_lang = 'de'
+                else:
+                    tts_lang = language_code
+                
+                tts_audio = generate_tts(
+                    tts_text,
+                    tts_lang,
+                    speed=audio_options.get('speech_speed', 1.0),
+                    loudness_db=audio_options.get('speech_loudness', 0)
+                )
+            except Exception as e:
+                logger.warning(f"TTS generation failed, using silence: {e}")
+                tts_audio = self._generate_silence(1.0, 48000)
+        else:
+            # TTS disabled - short pause instead
+            tts_audio = self._generate_silence(0.5, 48000)
         
         # 4. Combine: Pause + Audio + TTS
         # All segments need same sample rate
@@ -96,53 +146,153 @@ class AudioPlayer:
         )
         
         return wav_bytes
+
+
+    def _process_audio_frame(
+        self,
+        audio_data: np.ndarray,
+        sample_rate: int
+    ) -> np.ndarray:
+        """
+        Process audio frame with fade-in/out, LUFS normalization, and compression.
+        
+        Processing pipeline:
+        1. Fade-in (0.5s) and Fade-out (0.5s)
+        2. LUFS normalization to target loudness
+        3. Compressor to prevent clipping
+        
+        Args:
+            audio_data: Audio samples (int16, mono or stereo)
+            sample_rate: Sample rate in Hz
+            
+        Returns:
+            Processed audio samples (int16, mono)
+        """
+        # Convert to pydub AudioSegment for fade processing
+        audio_segment = AudioSegment(
+            audio_data.tobytes(),
+            frame_rate=sample_rate,
+            sample_width=audio_data.dtype.itemsize,
+            channels=1 if audio_data.ndim == 1 else audio_data.shape[1]
+        )
+        
+        # 1. Apply fade-in and fade-out
+        audio_segment = audio_segment.fade_in(FADE_DURATION_MS).fade_out(FADE_DURATION_MS)
+        logger.debug(f"Applied fade-in/out: {FADE_DURATION_MS}ms")
+        
+        # Convert to numpy for further processing
+        samples = np.array(audio_segment.get_array_of_samples(), dtype=np.float32)
+        
+        # Convert to mono if stereo
+        if audio_segment.channels == 2:
+            samples = samples.reshape((-1, 2)).mean(axis=1)
+        
+        # Normalize to [-1.0, 1.0] range for processing
+        samples = samples / 32768.0
+        
+        # 2. LUFS normalization (if available)
+        if PYLOUDNORM_AVAILABLE:
+            try:
+                # Measure current loudness
+                meter = pyln.Meter(sample_rate)
+                current_loudness = meter.integrated_loudness(samples)
+                
+                # Normalize to target LUFS
+                samples = pyln.normalize.loudness(samples, current_loudness, TARGET_LUFS)
+                
+                logger.debug(f"LUFS normalization: {current_loudness:.1f} → {TARGET_LUFS:.1f} LUFS")
+                
+            except Exception as e:
+                logger.warning(f"LUFS normalization failed: {e}")
+        else:
+            logger.debug("LUFS normalization skipped (pyloudnorm not available)")
+        
+        # 3. Apply compressor to prevent clipping (if available)
+        if PEDALBOARD_AVAILABLE:
+            try:
+                # Create compressor effect
+                compressor = Compressor(
+                    threshold_db=COMPRESSOR_THRESHOLD_DB,
+                    ratio=COMPRESSOR_RATIO
+                )
+                
+                # Apply compressor
+                board = Pedalboard([compressor])
+                samples = board(samples, sample_rate)
+                
+                logger.debug(f"Compressor applied: threshold={COMPRESSOR_THRESHOLD_DB}dB, ratio={COMPRESSOR_RATIO}:1")
+                
+            except Exception as e:
+                logger.warning(f"Compression failed: {e}")
+        else:
+            logger.debug("Compression skipped (pedalboard not available)")
+        
+        # Clip to safe range and convert back to int16
+        samples = np.clip(samples, -1.0, 1.0)
+        samples = (samples * 32767.0).astype(np.int16)
+        
+        return samples
+
     
     def _get_announcement_text(
             self,
             detection: Dict,
+            audio_number: int,
             filter_context: Dict,
-            use_sci: bool
+            audio_options: Dict
         ) -> str:
             """
-            Generate TTS announcement text based on filter context.
+            Generate TTS announcement text based on audio options.
             
-            Rules:
-            - Species filter active → ID + Confidence
-            - Time + Species filter → ID + Confidence
-            - Detection ID given OR only time filter → ID + Name + Confidence
-            - No filters → ID + Name + Confidence
+            Rules based on audio_options:
+            - say_audio_number: Include "Audio N"
+            - say_id: Include "ID 12345"
+            - audio_bird_name: 'none', 'local', or 'scientific'
+            - say_confidence: Include "XX Prozent"
             
             Args:
                 detection: Detection dict
+                audio_number: Sequential number in playlist (1, 2, 3, ...)
                 filter_context: Filter context dict
-                use_sci: Use scientific name
+                audio_options: Audio options dict with:
+                    - say_audio_number: bool
+                    - say_id: bool
+                    - say_confidence: bool
+                    - bird_name_option: 'none', 'local', 'scientific'
                 
             Returns:
                 Text for TTS announcement
             """
-            detection_id = detection['detection_id']
+            parts = []
             
-            # Format confidence: convert to words for TTS
-            confidence = detection['confidence']
-            conf_percent = int(round(confidence * 100))
+            # Audio Number
+            if audio_options.get('say_audio_number', True):
+                parts.append(f"Audio {audio_number}")
             
-            # Convert number to German words (e.g., 87 → "siebenundachtzig")
-            # Determine language for num2words
-            # For now, we assume German for confidence, can be extended
-            conf_percent_words = num2words(conf_percent, lang='de')
+            # Database ID
+            if audio_options.get('say_id', True):
+                detection_id = detection['detection_id']
+                parts.append(f"ID {detection_id}")
             
-            # Only ID + Confidence if species filter active
-            if filter_context.get('species_filter'):
-                return f"{detection_id} {conf_percent_words} Prozent"
-            
-            # ID + Name + Confidence otherwise
-            if use_sci:
+            # Bird Name
+            bird_name_option = audio_options.get('bird_name_option', 'local')
+            if bird_name_option == 'scientific':
                 name = detection['scientific_name']
-            else:
+                parts.append(name)
+            elif bird_name_option == 'local':
                 name = detection.get('local_name') or detection['scientific_name']
+                parts.append(name)
+            # 'none' -> no name
             
-            return f"{detection_id} {name} {conf_percent_words} Prozent"
-
+            # Confidence
+            if audio_options.get('say_confidence', True):
+                confidence = detection['confidence']
+                conf_percent = int(round(confidence * 100))
+                conf_percent_words = num2words(conf_percent, lang='de')
+                parts.append(f"{conf_percent_words} Prozent")
+            
+            # Combine parts
+            return " ".join(parts) if parts else "Audio"
 
     def _generate_silence(self, duration_seconds: float, sample_rate: int) -> np.ndarray:
         """
@@ -281,22 +431,28 @@ class AudioPlayer:
     def prepare_detection_audio_web(
         self,
         detection: Dict,
+        audio_number: int,
         language_code: str,
         filter_context: Dict,
-        use_sci: bool = False,
+        audio_options: Dict,
         disable_tts: bool = False
     ) -> BytesIO:
         """
         Create combined audio as MP3 (for web streaming).
         
-        Same as prepare_detection_audio() but returns MP3 instead of WAV.
-        Much smaller file size for web transfer.
-        
         Args:
             detection: Detection dict from query_detections()
+            audio_number: Sequential number in playlist (1, 2, 3, ...)
             language_code: Language code for TTS
             filter_context: Filter context dict
-            use_sci: Use scientific names
+            audio_options: Audio options dict with:
+                - say_audio_number: bool
+                - say_id: bool
+                - say_confidence: bool
+                - bird_name_option: 'none', 'local', 'scientific'
+                - speech_speed: float (0.5-2.0)
+                - speech_loudness: int (-20 to +20 dB)
+            disable_tts: Disable TTS announcements completely
             
         Returns:
             BytesIO with MP3 data
@@ -312,23 +468,39 @@ class AudioPlayer:
         try:
             start_offset, end_offset = calculate_snippet_offsets(detection, self.pm_seconds)
             audio_data, sample_rate = extract_snippet(wav_path, start_offset, end_offset)
+            
+            # Process audio frame: fade-in/out, LUFS normalization, compression
+            audio_data = self._process_audio_frame(audio_data, sample_rate)
+            
         except Exception as e:
-            logger.error(f"Failed to extract snippet for detection #{detection['detection_id']}: {e}")
+            logger.error(f"Failed to extract/process snippet for detection #{detection['detection_id']}: {e}")
             raise
         
-        # 3. Generate TTS announcement (nur wenn nicht disabled)
+        # 3. Generate TTS announcement (only if not disabled)
         if not disable_tts:
-            tts_text = self._get_announcement_text(detection, filter_context, use_sci)
+            tts_text = self._get_announcement_text(detection, audio_number, filter_context, audio_options)
             
             try:
-                # WICHTIG: Bei wissenschaftlichen Namen IMMER deutsche Stimme!
-                tts_lang = 'de' if use_sci else language_code
-                tts_audio = generate_tts(tts_text, tts_lang, use_sci=False)
+                # Determine voice language:
+                # - Scientific name -> always German
+                # - Local name -> language_code
+                bird_name_option = audio_options.get('bird_name_option', 'local')
+                if bird_name_option == 'scientific':
+                    tts_lang = 'de'
+                else:
+                    tts_lang = language_code
+                
+                tts_audio = generate_tts(
+                    tts_text, 
+                    tts_lang,
+                    speed=audio_options.get('speech_speed', 1.0),
+                    loudness_db=audio_options.get('speech_loudness', 0)
+                )
             except Exception as e:
                 logger.warning(f"TTS generation failed, using silence: {e}")
                 tts_audio = self._generate_silence(1.0, 48000)
         else:
-            # TTS disabled - nur kurze Pause statt Ansage
+            # TTS disabled - short pause instead
             tts_audio = self._generate_silence(0.5, 48000)
         
         # 4. Combine: Pause + Audio + TTS
@@ -339,7 +511,7 @@ class AudioPlayer:
             48000
         )
         
-        # 5. Convert to MP3 instead of WAV
+        # 5. Convert to MP3
         mp3_bytes = self._to_mp3_bytes(combined, 48000)
         
         logger.debug(
@@ -350,14 +522,15 @@ class AudioPlayer:
         return mp3_bytes
 
 
+
 def export_detections(
     db_path: Path,
     output_dir: Path,
     detections: List[Dict],
     language_code: str,
     filter_context: Dict,
+    audio_options: Dict,
     pm_seconds: float = 1.0,
-    use_sci: bool = False,
     disable_tts: bool = False
 ):
     """
@@ -369,8 +542,9 @@ def export_detections(
         detections: List of detections from query_detections()
         language_code: Language code for TTS
         filter_context: Filter context dict
+        audio_options: Audio options dict (see prepare_detection_audio)
         pm_seconds: Plus/Minus buffer
-        use_sci: Use scientific names
+        disable_tts: Disable TTS announcements
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     player = AudioPlayer(db_path, pm_seconds)
@@ -379,14 +553,14 @@ def export_detections(
     
     for i, detection in enumerate(detections, 1):
         try:
-            # Generate audio
-            # Note: WAV export uses the non-web version (WAV instead of MP3)
-            # We need to add disable_tts support here too
+            # Generate audio with sequential audio number
             audio_bytes = player.prepare_detection_audio(
                 detection,
-                language_code,
-                filter_context,
-                use_sci
+                audio_number=i,
+                language_code=language_code,
+                filter_context=filter_context,
+                audio_options=audio_options,
+                disable_tts=disable_tts
             )
             
             # Create filename
@@ -405,8 +579,9 @@ def export_detections(
         except Exception as e:
             logger.error(f"Failed to export detection #{detection['detection_id']}: {e}")
     
-    logger.info(f"Export complete: {len(detections)} files in {output_dir}")
+    logger.info(f"Export complete: {len(detections)} files in {output_dir}")    
     
+
 
 def export_detections_mp3(
     db_path: Path,
@@ -414,8 +589,8 @@ def export_detections_mp3(
     detections: List[Dict],
     language_code: str,
     filter_context: Dict,
+    audio_options: Dict,
     pm_seconds: float = 1.0,
-    use_sci: bool = False,
     disable_tts: bool = False
 ):
     """
@@ -427,8 +602,8 @@ def export_detections_mp3(
         detections: List of detections from query_detections()
         language_code: Language code for TTS
         filter_context: Filter context dict
+        audio_options: Audio options dict (see prepare_detection_audio_web)
         pm_seconds: Plus/Minus buffer
-        use_sci: Use scientific names
         disable_tts: Disable TTS announcements
     """
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -438,13 +613,14 @@ def export_detections_mp3(
     
     for i, detection in enumerate(detections, 1):
         try:
-            # Generate audio as MP3
+            # Generate audio as MP3 with sequential audio number
             audio_bytes = player.prepare_detection_audio_web(
                 detection,
-                language_code,
-                filter_context,
-                use_sci,
-                disable_tts
+                audio_number=i,
+                language_code=language_code,
+                filter_context=filter_context,
+                audio_options=audio_options,
+                disable_tts=disable_tts
             )
             
             # Create filename
@@ -464,3 +640,6 @@ def export_detections_mp3(
             logger.error(f"Failed to export detection #{detection['detection_id']}: {e}")
     
     logger.info(f"MP3 export complete: {len(detections)} files in {output_dir}")
+    
+    
+    

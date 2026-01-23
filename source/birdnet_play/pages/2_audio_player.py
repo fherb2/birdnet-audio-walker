@@ -5,6 +5,7 @@ Audio Player Page - Filter detections and play audio
 import streamlit as st
 from pathlib import Path
 from datetime import datetime, time as dt_time, timedelta
+from typing import List
 import tempfile
 import base64
 import json
@@ -19,13 +20,12 @@ st.set_page_config(
     page_title="Audio Player - BirdNET",
     page_icon="🎵",
     layout="wide",
-    initial_sidebar_state="expanded"  # Show sidebar on this page
+    initial_sidebar_state="expanded"
 )
 
 # Page title
 st.title("🐦 BirdNET Audio Player")
 st.header("🎵 Audio Player")
-
 
 # Check if database is selected
 db_path = st.session_state.get('db_path')
@@ -53,110 +53,335 @@ st.divider()
 
 
 # =============================================================================
-# FILTER SIDEBAR
+# SESSION STATE INITIALIZATION (with defaults)
 # =============================================================================
 
-st.sidebar.title("🔍 Filter")
+def init_filter_state():
+    """Initialize filter session state with defaults."""
+    if 'filter_species' not in st.session_state:
+        st.session_state['filter_species'] = ""
+    if 'filter_date_from' not in st.session_state or 'filter_date_to' not in st.session_state:
+        # Set date range from database (not current date!)
+        from shared.db_queries import get_recording_date_range
+        min_date, max_date = get_recording_date_range(db_path)
+        st.session_state['filter_date_from'] = min_date.date() if min_date else None
+        st.session_state['filter_date_to'] = max_date.date() if max_date else None
+    if 'filter_use_time' not in st.session_state:
+        st.session_state['filter_use_time'] = False
+    if 'filter_time_start' not in st.session_state:
+        st.session_state['filter_time_start'] = dt_time(0, 0)
+    if 'filter_time_end' not in st.session_state:
+        st.session_state['filter_time_end'] = dt_time(23, 59)
+    if 'filter_confidence' not in st.session_state:
+        st.session_state['filter_confidence'] = "70%"
+    if 'filter_limit' not in st.session_state:
+        st.session_state['filter_limit'] = 25
+    if 'filter_offset' not in st.session_state:
+        st.session_state['filter_offset'] = 0
+    if 'filter_sort' not in st.session_state:
+        st.session_state['filter_sort'] = "time"
 
-# Species filter
-species = st.sidebar.text_input(
-    "Species",
-    key=f"species_{hash(str(db_path))}",
-    help="Search by scientific, local, or Czech name (partial match). Press ENTER to apply."
-)
+
+def init_audio_state():
+    """Initialize audio options session state with defaults."""
+    if 'audio_say_number' not in st.session_state:
+        st.session_state['audio_say_number'] = False
+    if 'audio_bird_name' not in st.session_state:
+        st.session_state['audio_bird_name'] = "none"
+    if 'audio_say_id' not in st.session_state:
+        st.session_state['audio_say_id'] = False
+    if 'audio_say_confidence' not in st.session_state:
+        st.session_state['audio_say_confidence'] = False
+    if 'audio_speech_speed' not in st.session_state:
+        st.session_state['audio_speech_speed'] = 1.0  # 0.5 - 2.0
+    if 'audio_speech_loudness' not in st.session_state:
+        st.session_state['audio_speech_loudness'] = -2
+    if 'audio_frame_duration' not in st.session_state:
+        st.session_state['audio_frame_duration'] = 1.0  # 0.5 - 6.0 seconds
+
+
+# Initialize session state
+init_filter_state()
+init_audio_state()
+
+
+# =============================================================================
+# FILTER SECTION (Main Area - Top)
+# =============================================================================
+
+st.subheader("🔍 Search Filters")
+
+# Species filter with auto-complete
+from streamlit_searchbox import st_searchbox
+from shared.db_queries import search_species_in_list
+
+def search_species_callback(search_term: str) -> List[str]:
+    """Callback for searchbox - searches in species_list."""
+    return search_species_in_list(db_path, search_term, limit=10)
+
+col1, col2 = st.columns([3, 1])
+with col1:
+    current_species = st.session_state.get('filter_species', '')
+    
+    # If species already selected (e.g., from Page 1), show it with clear button
+    if current_species:
+        col_a, col_b = st.columns([4, 1])
+        with col_a:
+            st.info(f"🔍 Selected: **{current_species}**")
+        with col_b:
+            if st.button("✕", key="clear_species", help="Clear species filter"):
+                st.session_state['filter_species'] = ''
+                st.rerun()
+    else:
+        # No species selected - show searchbox
+        selected_species = st_searchbox(
+            search_species_callback,
+            key="species_searchbox",
+            placeholder="Search species... (type to filter)",
+            clear_on_submit=False
+        )
+        
+        # Update session state if selection made
+        if selected_species:
+            # Extract scientific name from "Scientific (Local)" format
+            if '(' in selected_species:
+                scientific_name = selected_species.split(' (')[0]
+            else:
+                scientific_name = selected_species
+            
+            st.session_state['filter_species'] = scientific_name
+
+with col2:
+    # Xeno-Canto button (only active if species selected)
+    species_for_xc = st.session_state.get('filter_species', '')
+    
+    if species_for_xc:
+        # Build Xeno-Canto URL with scientific name
+        # Replace spaces with + for URL
+        xc_query = species_for_xc.replace(' ', '+')
+        xc_url = f"https://xeno-canto.org/explore?query={xc_query}&view=3"
+        
+        st.link_button(
+            "🔊 Xeno-Canto",
+            xc_url,
+            help=f"Open {species_for_xc} in Xeno-Canto (new tab)",
+            use_container_width=True
+        )
+    else:
+        # Disabled placeholder when no species selected
+        st.button(
+            "🔊 Xeno-Canto",
+            disabled=True,
+            help="Select a species first",
+            use_container_width=True
+        )
 
 # Date filters
-st.sidebar.subheader("Date Range")
-col1, col2 = st.sidebar.columns(2)
-
+col1, col2, col3 = st.columns(3)
 with col1:
-    date_from = st.date_input("From", value=None, key=f"date_from_{hash(str(db_path))}")
+    date_from = st.date_input(
+        "Date From",
+        value=st.session_state['filter_date_from'],
+        key="input_date_from"
+    )
+    st.session_state['filter_date_from'] = date_from
+
 with col2:
-    date_to = st.date_input("To", value=None, key=f"date_to_{hash(str(db_path))}")
+    date_to = st.date_input(
+        "Date To",
+        value=st.session_state['filter_date_to'],
+        key="input_date_to"
+    )
+    st.session_state['filter_date_to'] = date_to
 
-# Time of day filter
-st.sidebar.subheader("Time of Day")
-use_time_filter = st.sidebar.checkbox("Enable time filter", key=f"use_time_filter_{hash(str(db_path))}")
+with col3:
+    use_time_filter = st.checkbox(
+        "Enable Time Filter",
+        value=st.session_state['filter_use_time'],
+        key="input_use_time"
+    )
+    st.session_state['filter_use_time'] = use_time_filter
 
-time_start = None
-time_end = None
-
+# Time filters (if enabled)
 if use_time_filter:
-    col1, col2 = st.sidebar.columns(2)
+    col1, col2 = st.columns(2)
     with col1:
-        time_start = st.time_input("Start", value=dt_time(0, 0), key=f"time_start_{hash(str(db_path))}")
-    with col2:
-        time_end = st.time_input("End", value=dt_time(23, 59), key=f"time_end_{hash(str(db_path))}")
+        time_start = st.time_input(
+            "Time Start",
+            value=st.session_state['filter_time_start'],
+            key="input_time_start"
+        )
+        st.session_state['filter_time_start'] = time_start
     
-    # Auto-correct: time_end must be >= time_start + 1 minute
+    with col2:
+        time_end = st.time_input(
+            "Time End",
+            value=st.session_state['filter_time_end'],
+            key="input_time_end"
+        )
+        st.session_state['filter_time_end'] = time_end
+    
+    # Auto-correct: time_end >= time_start + 1 minute
     if time_start and time_end:
         dt_start = datetime.combine(datetime.today(), time_start)
         dt_end = datetime.combine(datetime.today(), time_end)
         if dt_end < dt_start + timedelta(minutes=1):
             time_end = (dt_start + timedelta(minutes=1)).time()
+            st.session_state['filter_time_end'] = time_end
 
-# Confidence filter
-conf_options = [f"{i}%" for i in range(5, 100, 5)]
-conf_selected = st.sidebar.selectbox(
-    "Min Confidence",
-    options=["All"] + conf_options,
-    index=14,  # 70%
-    key=f"confidence_{hash(str(db_path))}",
-    help="Minimum confidence threshold"
+# Confidence, Limit, Offset
+col1, col2, col3, col4 = st.columns(4)
+
+with col1:
+    conf_options = ["All"] + [f"{i}%" for i in range(5, 100, 5)]
+    current_conf_idx = 0
+    if st.session_state['filter_confidence'] in conf_options:
+        current_conf_idx = conf_options.index(st.session_state['filter_confidence'])
+    
+    conf_selected = st.selectbox(
+        "Min Confidence",
+        options=conf_options,
+        index=current_conf_idx,
+        key="input_confidence"
+    )
+    st.session_state['filter_confidence'] = conf_selected
+
+with col2:
+    limit = st.number_input(
+        "Limit",
+        min_value=1,
+        max_value=1000,
+        value=st.session_state['filter_limit'],
+        key="input_limit"
+    )
+    st.session_state['filter_limit'] = limit
+
+with col3:
+    offset = st.number_input(
+        "Offset",
+        min_value=0,
+        value=st.session_state['filter_offset'],
+        step=10,
+        key="input_offset"
+    )
+    st.session_state['filter_offset'] = offset
+
+with col4:
+    sort_options = {
+        "Time (oldest→newest)": "time",
+        "Confidence (high→low)": "confidence", 
+        "ID (upwards)": "id"
+    }
+    current_sort_label = [k for k, v in sort_options.items() if v == st.session_state['filter_sort']][0]
+    
+    sort_selected = st.selectbox(
+        "Sort By",
+        options=list(sort_options.keys()),
+        index=list(sort_options.keys()).index(current_sort_label),
+        key="input_sort"
+    )
+    st.session_state['filter_sort'] = sort_options[sort_selected]
+
+# Apply Filters Button
+if st.button("🔍 **Apply Filters**", type="primary", width="stretch"):
+    st.session_state['filters_applied'] = True
+    st.rerun()
+
+st.divider()
+
+
+# =============================================================================
+# SIDEBAR: AUDIO OPTIONS
+# =============================================================================
+
+st.sidebar.title("🎵 Audio Options")
+
+# Say Audio Number
+say_number = st.sidebar.checkbox(
+    "Say Audio Number",
+    value=st.session_state['audio_say_number'],
+    key="sidebar_say_number"
 )
-min_confidence = None if conf_selected == "All" else int(conf_selected.rstrip('%')) / 100
+st.session_state['audio_say_number'] = say_number
 
-# Limit and offset
-limit = st.sidebar.number_input(
-    "Limit",
-    min_value=1,
-    max_value=1000,
-    value=10,
-    key=f"limit_{hash(str(db_path))}",
-    help="Maximum number of detections to load"
+# Say Bird Name
+st.sidebar.subheader("Say Bird Name")
+bird_name_option = st.sidebar.radio(
+    "Name Type",
+    options=["None", "Local Name", "Scientific Name"],
+    index=["none", "local", "scientific"].index(st.session_state['audio_bird_name']),
+    key="sidebar_bird_name"
 )
+st.session_state['audio_bird_name'] = {
+    "None": "none",
+    "Local Name": "local",
+    "Scientific Name": "scientific"
+}[bird_name_option]
 
-offset = st.sidebar.number_input(
-    "Offset",
-    min_value=0,
-    value=0,
-    step=10,
-    key=f"offset_{hash(str(db_path))}",
-    help="Start position (for pagination)"
+# Say DB ID
+say_id = st.sidebar.checkbox(
+    "Say Database ID",
+    value=st.session_state['audio_say_id'],
+    key="sidebar_say_id"
 )
+st.session_state['audio_say_id'] = say_id
 
-# PM buffer
-pm_seconds = st.sidebar.slider(
-    "PM Buffer (seconds)",
-    min_value=0.0,
-    max_value=5.0,
-    value=1.0,
+# Say Confidence
+say_confidence = st.sidebar.checkbox(
+    "Say Confidence",
+    value=st.session_state['audio_say_confidence'],
+    key="sidebar_say_confidence"
+)
+st.session_state['audio_say_confidence'] = say_confidence
+
+st.sidebar.divider()
+
+# Speech Speed
+speech_speed = st.sidebar.slider(
+    "Speech Speed",
+    min_value=0.5,
+    max_value=2.0,
+    value=st.session_state['audio_speech_speed'],
+    step=0.1,
+    key="sidebar_speech_speed",
+    help="1.0 = normal speed"
+)
+st.session_state['audio_speech_speed'] = speech_speed
+
+# Speech Loudness
+speech_loudness = st.sidebar.slider(
+    "Speech Loudness",
+    min_value=-10,
+    max_value=4,
+    value=st.session_state['audio_speech_loudness'],
+    step=1,
+    key="sidebar_speech_loudness",
+    help="0 = normal loudness, ±dB adjustment"
+)
+st.session_state['audio_speech_loudness'] = speech_loudness
+
+st.sidebar.divider()
+
+# Audio Frame Duration (formerly PM Buffer)
+frame_duration = st.sidebar.slider(
+    "Audio Frame Duration (s)",
+    min_value=0.5,
+    max_value=6.0,
+    value=st.session_state['audio_frame_duration'],
     step=0.5,
-    key=f"pm_seconds_{hash(str(db_path))}",
-    help="Plus/Minus buffer around detection"
+    key="sidebar_frame_duration",
+    help="Duration of audio frame around detection (0.5-6.0 seconds)"
 )
+st.session_state['audio_frame_duration'] = frame_duration
 
-# Options
-st.sidebar.subheader("Options")
-use_sci = st.sidebar.checkbox(
-    "Scientific Names",
-    key=f"use_sci_{hash(str(db_path))}",
-    help="Use scientific names for TTS instead of local names"
-)
+st.sidebar.divider()
 
-disable_tts = st.sidebar.checkbox(
-    "Disable Voice Announcements",
-    key=f"disable_tts_{hash(str(db_path))}",
-    help="Disable TTS announcements (only play bird sounds)"
-)
+# Apply Audio Settings Button
+if st.sidebar.button("🎵 **Apply Audio Settings**", type="primary", width="stretch"):
+    st.session_state['audio_settings_applied'] = True
+    st.rerun()
 
-shuffle = st.sidebar.checkbox(
-    "Shuffle",
-    key=f"shuffle_{hash(str(db_path))}",
-    help="Randomize playback order"
-)
-
-# Cache-Clear Button
+# Cache Clear Button
 if st.sidebar.button("🔄 Clear Audio Cache"):
     keys_to_remove = [k for k in st.session_state.keys() if k.startswith('audio_cache_')]
     for key in keys_to_remove:
@@ -166,34 +391,42 @@ if st.sidebar.button("🔄 Clear Audio Cache"):
 
 
 # =============================================================================
-# CREATE DETECTION FILTER
+# LOAD DETECTIONS (only if filters were applied)
 # =============================================================================
 
+if not st.session_state.get('filters_applied', False):
+    st.info("👆 Configure filters above and click **'Apply Filters'** to load detections")
+    st.stop()
+
+# Build filter from session state
+min_confidence = None if st.session_state['filter_confidence'] == "All" else \
+    int(st.session_state['filter_confidence'].rstrip('%')) / 100
+
+# Determine sort order based on sort_by
+sort_order = "desc" if st.session_state['filter_sort'] == "confidence" else "asc"
+
 detection_filter = DetectionFilter(
-    species=species if species else None,
-    date_from=datetime.combine(date_from, dt_time(0, 0)) if date_from else None,
-    date_to=datetime.combine(date_to, dt_time(23, 59)) if date_to else None,
-    time_start=time_start,
-    time_end=time_end,
+    species=st.session_state['filter_species'] if st.session_state['filter_species'] else None,
+    date_from=datetime.combine(st.session_state['filter_date_from'], dt_time(0, 0)) if st.session_state['filter_date_from'] else None,
+    date_to=datetime.combine(st.session_state['filter_date_to'], dt_time(23, 59)) if st.session_state['filter_date_to'] else None,
+    time_start=st.session_state['filter_time_start'] if st.session_state['filter_use_time'] else None,
+    time_end=st.session_state['filter_time_end'] if st.session_state['filter_use_time'] else None,
     min_confidence=min_confidence,
-    limit=limit,
-    offset=offset,
-    shuffle=shuffle,
-    pm_seconds=pm_seconds,
-    use_sci=use_sci
+    limit=st.session_state['filter_limit'],
+    offset=st.session_state['filter_offset'],
+    sort_by=st.session_state['filter_sort'],
+    sort_order=sort_order,
+    pm_seconds=st.session_state['audio_frame_duration'],
+    use_sci=(st.session_state['audio_bird_name'] == "scientific")
 )
 
 # Validate filter
 error = detection_filter.validate()
 if error:
-    st.sidebar.error(f"❌ Invalid filter: {error}")
+    st.error(f"❌ Invalid filter: {error}")
     st.stop()
 
-
-# =============================================================================
-# LOAD DETECTIONS
-# =============================================================================
-
+# Query detections
 with st.spinner("Loading detections..."):
     try:
         detections = query_detections(db_path, **detection_filter.to_query_params())
@@ -202,21 +435,80 @@ with st.spinner("Loading detections..."):
             st.warning("⚠️ No detections found matching filters")
             st.stop()
         
-        # Shuffle if requested
-        if detection_filter.shuffle:
-            import random
-            random.shuffle(detections)
-        
         # Store in session state
         st.session_state['detections'] = detections
         st.session_state['filter'] = detection_filter
         st.session_state['language_code'] = language_code
-        st.session_state['disable_tts'] = disable_tts
         
     except Exception as e:
         st.error(f"❌ Error loading detections: {e}")
         logger.exception("Query failed")
         st.stop()
+
+
+def calculate_single_audio_length(
+    frame_duration: float,
+    audio_options: dict,
+    avg_tts_duration: float = 4.0
+) -> float:
+    """
+    Calculate the duration of a single audio output in seconds.
+    
+    Components:
+    - 1.0s initial pause
+    - frame_duration (before detection)
+    - 3.0s detection snippet (BirdNET standard)
+    - frame_duration (after detection)
+    - TTS announcement (estimated)
+    
+    Args:
+        frame_duration: Audio Frame Duration in seconds (0.5-6.0)
+        audio_options: Audio options dict (for TTS estimation)
+        avg_tts_duration: Average TTS duration in seconds (default: 4.0s)
+        
+    Returns:
+        Total duration in seconds
+    """
+    # Base components
+    initial_pause = 1.0
+    detection_audio = 3.0  # BirdNET standard detection length
+    frame_before = frame_duration
+    frame_after = frame_duration
+    
+    # TTS duration estimation based on what's being said
+    if audio_options.get('bird_name_option') == 'none' and \
+       not audio_options.get('say_audio_number') and \
+       not audio_options.get('say_id') and \
+       not audio_options.get('say_confidence'):
+        # No TTS at all
+        tts_duration = 0.5  # Short pause instead
+    else:
+        # Estimate TTS length based on components
+        # Adjust by speech speed
+        speed = audio_options.get('speech_speed', 1.0)
+        tts_duration = avg_tts_duration / speed
+    
+    total = initial_pause + frame_before + detection_audio + frame_after + tts_duration
+    
+    return total
+
+
+def calculate_outputs_per_minute(single_audio_length: float) -> float:
+    """
+    Calculate how many audio outputs can be played per minute.
+    
+    Args:
+        single_audio_length: Duration of single audio in seconds
+        
+    Returns:
+        Number of outputs per minute (rounded to 1 decimal)
+    """
+    if single_audio_length <= 0:
+        return 0.0
+    
+    outputs_per_minute = 60.0 / single_audio_length
+    
+    return round(outputs_per_minute, 1)
 
 
 # =============================================================================
@@ -227,6 +519,44 @@ detections = st.session_state['detections']
 filter_context = detection_filter.get_filter_context()
 
 st.subheader(f"📊 {len(detections)} Detection(s) Loaded")
+
+# Build audio_options dict from session state FIRST
+audio_options = {
+    'say_audio_number': st.session_state['audio_say_number'],
+    'say_id': st.session_state['audio_say_id'],
+    'say_confidence': st.session_state['audio_say_confidence'],
+    'bird_name_option': st.session_state['audio_bird_name'],
+    'speech_speed': st.session_state['audio_speech_speed'],
+    'speech_loudness': st.session_state['audio_speech_loudness']
+}
+
+# Calculate and display audio statistics
+single_length = calculate_single_audio_length(
+    st.session_state['audio_frame_duration'],
+    audio_options
+)
+outputs_per_min = calculate_outputs_per_minute(single_length)
+
+col1, col2, col3 = st.columns(3)
+with col1:
+    st.metric(
+        "Single Audio Length",
+        f"{single_length:.1f}s",
+        help="Duration of one complete audio output (pause + frame + detection + frame + TTS)"
+    )
+with col2:
+    st.metric(
+        "Outputs per Minute",
+        f"{outputs_per_min:.1f}",
+        help="How many detections can be played per minute at current settings"
+    )
+with col3:
+    total_duration_min = (len(detections) * single_length) / 60
+    st.metric(
+        "Total Playback Time",
+        f"{total_duration_min:.1f} min",
+        help="Estimated total time to play all loaded detections"
+    )
 
 # Show detection list
 with st.expander("📋 Detection List", expanded=False):
@@ -239,13 +569,14 @@ with st.expander("📋 Detection List", expanded=False):
             f"{det['segment_start_local']}"
         )
 
-
-# =============================================================================
-# EXPORT BUTTONS
-# =============================================================================
-
 st.divider()
 col1, col2, col3 = st.columns([2, 1, 1])
+
+# Note: Export uses current audio settings but disable_tts depends on bird_name option
+disable_tts = (st.session_state['audio_bird_name'] == "none" and 
+               not st.session_state['audio_say_number'] and
+               not st.session_state['audio_say_id'] and
+               not st.session_state['audio_say_confidence'])
 
 with col2:
     if st.button("💾 Export as WAV"):
@@ -254,15 +585,15 @@ with col2:
                 export_dir = Path(tempfile.mkdtemp(prefix="birdnet_export_wav_"))
                 
                 export_detections(
-                    db_path,
-                    export_dir,
-                    detections,
-                    language_code,
-                    filter_context,
-                    pm_seconds,
-                    use_sci,
-                    disable_tts
-                )
+                        db_path,
+                        export_dir,
+                        detections,
+                        language_code,
+                        filter_context,
+                        audio_options,
+                        st.session_state['audio_frame_duration'],
+                        disable_tts
+                    )
                 
                 st.success(f"✅ Exported {len(detections)} WAV files to: {export_dir}")
                 
@@ -277,15 +608,15 @@ with col3:
                 export_dir = Path(tempfile.mkdtemp(prefix="birdnet_export_mp3_"))
                 
                 export_detections_mp3(
-                    db_path,
-                    export_dir,
-                    detections,
-                    language_code,
-                    filter_context,
-                    pm_seconds,
-                    use_sci,
-                    disable_tts
-                )
+                        db_path,
+                        export_dir,
+                        detections,
+                        language_code,
+                        filter_context,
+                        audio_options,
+                        st.session_state['audio_frame_duration'],
+                        disable_tts
+                    )
                 
                 st.success(f"✅ Exported {len(detections)} MP3 files to: {export_dir}")
                 
@@ -301,12 +632,35 @@ with col3:
 st.divider()
 st.subheader("🎵 Audio Player")
 
+# Clear audio cache if filters or audio settings changed
+if st.session_state.get('filters_applied', False) or st.session_state.get('audio_settings_applied', False):
+    # Clear cache to force regeneration
+    keys_to_remove = [k for k in st.session_state.keys() if k.startswith('audio_cache_')]
+    for key in keys_to_remove:
+        del st.session_state[key]
+    
+    # Reset flags
+    if 'filters_applied' in st.session_state:
+        st.session_state['filters_applied'] = False
+    if 'audio_settings_applied' in st.session_state:
+        st.session_state['audio_settings_applied'] = False
+    
+    logger.info("Audio cache cleared due to filter/settings change")
+
 with st.spinner("Preparing audio files..."):
     try:
-        player = AudioPlayer(db_path, pm_seconds)
+        player = AudioPlayer(db_path, st.session_state['audio_frame_duration'])
         
-        # Generate cache key
-        cache_key = f"audio_cache_{hash(tuple(d['detection_id'] for d in detections))}"
+        # Generate cache key (include audio settings to force regeneration on changes)
+        cache_params = (
+            tuple(d['detection_id'] for d in detections),
+            st.session_state['audio_frame_duration'],
+            st.session_state['audio_bird_name'],
+            st.session_state['audio_say_number'],
+            st.session_state['audio_say_id'],
+            st.session_state['audio_say_confidence']
+        )
+        cache_key = f"audio_cache_{hash(cache_params)}"
         
         # Check if already cached
         if cache_key in st.session_state:
@@ -320,12 +674,13 @@ with st.spinner("Preparing audio files..."):
             for i, det in enumerate(detections):
                 try:
                     audio_bytes = player.prepare_detection_audio_web(
-                        det,
-                        language_code,
-                        filter_context,
-                        use_sci,
-                        disable_tts
-                    )
+                            det,
+                            audio_number=i+1,  # Sequential number (1, 2, 3, ...)
+                            language_code=language_code,
+                            filter_context=filter_context,
+                            audio_options=audio_options,
+                            disable_tts=disable_tts
+                        )
                     
                     audio_b64 = base64.b64encode(audio_bytes.read()).decode()
                     conf_pct = det['confidence'] * 100
@@ -350,7 +705,7 @@ with st.spinner("Preparing audio files..."):
             st.session_state[cache_key] = audio_files
             logger.info(f"Cached {len(audio_files)} audio files")
         
-        # Create HTML player
+        # Create HTML player (same as before)
         audio_data_js = json.dumps(audio_files)
         
         html = f"""
@@ -650,3 +1005,6 @@ with st.spinner("Preparing audio files..."):
     except Exception as e:
         st.error(f"❌ Failed to create player: {e}")
         logger.exception("Player creation failed")
+        
+        
+        

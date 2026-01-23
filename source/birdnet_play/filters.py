@@ -30,12 +30,15 @@ class DetectionFilter:
     min_confidence: Optional[float] = None
     
     # Pagination
-    limit: int = 50
+    limit: int = 25  # Changed default from 50 to 25
     offset: int = 0
     
+    # Sort options
+    sort_by: str = "time"  # "time", "confidence", or "id"
+    sort_order: str = "asc"  # "asc" or "desc"
+    
     # Options
-    shuffle: bool = False
-    pm_seconds: float = 1.0
+    pm_seconds: float = 1.0  # Will be "Audio Frame Duration" in UI (0.5-6.0)
     use_sci: bool = False
     
     def has_species_filter(self) -> bool:
@@ -90,7 +93,9 @@ class DetectionFilter:
             'time_range': time_range,
             'min_confidence': self.min_confidence,
             'limit': self.limit,
-            'offset': self.offset
+            'offset': self.offset,
+            'sort_by': self.sort_by,
+            'sort_order': self.sort_order
         }
     
     def validate(self) -> Optional[str]:
@@ -123,9 +128,16 @@ class DetectionFilter:
         if self.offset < 0:
             return "offset must be >= 0"
         
-        # PM validation
-        if self.pm_seconds < 0:
-            return "pm_seconds must be >= 0"
+        # PM validation (Audio Frame Duration range: 0.5-6.0)
+        if self.pm_seconds < 0.5 or self.pm_seconds > 6.0:
+            return "Audio Frame Duration must be between 0.5 and 6.0 seconds"
+        
+        # Sort validation
+        if self.sort_by not in ["time", "confidence", "id"]:
+            return "sort_by must be 'time', 'confidence', or 'id'"
+        
+        if self.sort_order not in ["asc", "desc"]:
+            return "sort_order must be 'asc' or 'desc'"
         
         return None
     
@@ -159,7 +171,8 @@ class DetectionFilter:
         if self.shuffle:
             parts.append("shuffle=True")
         
-        parts.append(f"pm={self.pm_seconds}s")
+        parts.append(f"frame_duration={self.pm_seconds}s")
+        parts.append(f"sort={self.sort_by}_{self.sort_order}")
         
         if self.use_sci:
             parts.append("use_sci=True")
@@ -243,3 +256,4 @@ def parse_date(date_str: str) -> datetime:
         day = int(parts[2])
         
         return datetime(year, month, day)
+    
