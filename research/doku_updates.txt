@@ -1,0 +1,408 @@
+DOKUMENTATIONS-ÄNDERUNGEN FÜR "BirdNET Walker & Play - Vollständige Projekt-Dokumentation.md"
+================================================================================================
+
+WICHTIG: Diese Änderungen basieren auf dem aktuellen Stand der Code-Files vom 2026-01-24.
+Alle Änderungen sind fertiggestellt und produktiv im Einsatz.
+
+================================================================================================
+ÄNDERUNG 1: Projektstruktur - Neue Page hinzufügen
+================================================================================================
+
+POSITION: In Abschnitt "3.1 Verzeichnis-Layout" 
+SUCHEN NACH der Zeile:
+    └── birdnet_play/pages/              # Streamlit Multi-Page App
+        ├── 1_database_overview.py  # DB-Auswahl, Metadata, Species-Liste
+        └── 2_audio_player.py       # Filter, Audio-Player, Export
+
+[EINFÜGEN NACH der Zeile "└── 2_audio_player.py"]
+
+        └── 3_heatmap_alaltair.py   # Activity Heatmap (Altair-Version)
+
+[ENDE_DER_EINFÜGUNG]
+
+================================================================================================
+ÄNDERUNG 2: Technologie-Stack - Neue Dependencies
+================================================================================================
+
+POSITION: In Abschnitt "2.1 Core Technologies"
+SUCHEN NACH dem Block "**Web-Interface:**" (ca. Zeile 60-62):
+**Web-Interface:**
+- Streamlit 1.53.0+
+- streamlit-aggrid für interaktive Tabellen
+
+[ERSETZEN durch:]
+
+**Web-Interface:**
+- Streamlit 1.53.0+
+- streamlit-aggrid für interaktive Tabellen
+- streamlit-searchbox für Species-Autocomplete
+- Altair für interaktive Visualisierungen (Heatmap)
+
+[ENDE_DER_EINFÜGUNG]
+
+================================================================================================
+ÄNDERUNG 3: db_queries.py - Neue Funktionen dokumentieren
+================================================================================================
+
+POSITION: In Abschnitt "5.1 shared/ - Gemeinsame Funktionen"
+SUCHEN NACH dem Unterabschnitt "#### **db_queries.py**"
+SUCHEN NACH der Auflistung der "**Hauptfunktionen:**"
+
+[EINFÜGEN VOR der letzten Aufzählung "**Filter-Parameter für `query_detections()`:**"]
+
+- `search_species_in_list()` - Autocomplete-Suche für Species (für streamlit_searchbox)
+
+[ENDE_DER_EINFÜGUNG]
+
+================================================================================================
+ÄNDERUNG 4: db_queries.py - time_range Parameter dokumentieren
+================================================================================================
+
+POSITION: Im gleichen Abschnitt "5.1 shared/ - Gemeinsame Funktionen"
+SUCHEN NACH "**Filter-Parameter für `query_detections()`:**"
+SUCHEN NACH der Zeile:
+- `date_from/date_to` - Datum-Range
+
+[EINFÜGEN DIREKT NACH dieser Zeile:]
+
+- `time_range` - Tuple (start_time, end_time) für Tageszeit-Filter (kombiniert mit date_from/date_to)
+
+[ENDE_DER_EINFÜGUNG]
+
+================================================================================================
+ÄNDERUNG 5: audio_extract.py - Breaking Change dokumentieren
+================================================================================================
+
+POSITION: In Abschnitt "5.1 shared/ - Gemeinsame Funktionen"
+SUCHEN NACH dem Unterabschnitt "#### **audio_extract.py**"
+SUCHEN NACH der Beschreibung von "**Hauptfunktionen:**"
+SUCHEN NACH:
+- `extract_snippet(wav_path, start, end)` - Extrahiert Audio als numpy array
+
+[ERSETZEN durch:]
+
+- `extract_snippet(wav_path, start, end)` - Extrahiert Audio → **Gibt Tuple zurück: (audio_data, sample_rate)**
+
+[ENDE_DER_EINFÜGUNG]
+
+HINWEIS: Dies ist ein Breaking Change! Alle Aufrufer müssen angepasst werden:
+Vorher: `audio_data = extract_snippet(...)`
+Jetzt: `audio_data, sample_rate = extract_snippet(...)`
+
+================================================================================================
+ÄNDERUNG 6: player.py - Neue Funktion prepare_detection_audio_simple()
+================================================================================================
+
+POSITION: In Abschnitt "5.3 birdnet_play/ - Audio-Playback & Web-Interface"
+SUCHEN NACH dem Unterabschnitt "#### **player.py**"
+SUCHEN NACH der Beschreibung von "**Hauptmethoden:**"
+SUCHEN NACH:
+- `prepare_detection_audio(...)` - Kombiniert Audio für WAV-Export
+- `prepare_detection_audio_web(...)` - Kombiniert Audio für Web (MP3)
+
+[EINFÜGEN DIREKT NACH diesen beiden Zeilen:]
+
+- `prepare_detection_audio_simple(...)` - Einfaches Audio ohne TTS (für Heatmap-Dialog)
+
+[ENDE_DER_EINFÜGUNG]
+
+================================================================================================
+ÄNDERUNG 7: Neue Page 3_heatmap_alaltair.py vollständig dokumentieren
+================================================================================================
+
+POSITION: In Abschnitt "5.4 birdnet_play/pages/ - Streamlit Pages"
+SUCHEN NACH dem Ende der Beschreibung von "#### **2_audio_player.py**"
+SUCHEN NACH dem letzten Absatz dieser Sektion, der mit "**Audio Player (Custom HTML):**" beginnt
+
+[EINFÜGEN DIREKT NACH dem kompletten Abschnitt "2_audio_player.py":]
+
+#### **3_heatmap_alaltair.py**
+**Zweck:** Activity Heatmap - Zeitliche Verteilung von Detections visualisieren.
+
+**Hauptfunktionalität:**
+- **Altair-basierte Heatmap:** 2D-Visualisierung mit Datum (X-Achse) und Tageszeit (Y-Achse, 30-Min-Intervalle)
+- **Interaktive Zell-Auswahl:** Click-Handler öffnet Dialog mit Detections der gewählten Halbstunde
+- **Embedded Audio-Player:** Spielt Detections direkt im Dialog (ohne TTS)
+- **Flexible Farbskalen:** 16 verschiedene Colormaps (inferno, viridis, plasma, etc.)
+- **Gewichtungs-Modi:** Sum of Confidences oder Count
+- **Export-Funktionen:** PNG und CSV
+
+**Layout:**
+```
+┌─────────────────────────────────────────────────────┐
+│  Sidebar: Heatmap Options                          │
+│  - Colormap Selection (16 Optionen)                │
+│  - Weight by Confidence (Checkbox)                 │
+│  - Guide (Info-Box)                                │
+└─────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────┐
+│  Main Area                                          │
+│  ┌───────────────────────────────────────────────┐ │
+│  │ 🔍 Search Filters                             │ │
+│  │ - Species (mit Autocomplete + Xeno-Canto)    │ │
+│  │ - Date From/To                                │ │
+│  │ - Min Confidence                              │ │
+│  │ [🔍 Apply Filters]                            │ │
+│  └───────────────────────────────────────────────┘ │
+│                                                     │
+│  ┌───────────────────────────────────────────────┐ │
+│  │ 📊 Activity Heatmap (Altair Chart)            │ │
+│  │ - X-Axis: Dates (Labels nur Montags)         │ │
+│  │ - Y-Axis: 48 Half-Hours (Labels alle 3h)     │ │
+│  │ - Click → Dialog                              │ │
+│  └───────────────────────────────────────────────┘ │
+│                                                     │
+│  [💾 Export PNG] [💾 Export CSV]                   │
+└─────────────────────────────────────────────────────┘
+```
+
+**Dialog-Funktion `show_play_dialog()`:**
+Öffnet bei Zell-Click ein Modal mit:
+- **Metadaten:** Datum, Zeit, Species-Filter, Cell-Stats (Count, Total Conf, Avg Conf)
+- **Query:** Lädt max. 25 Detections aus gewählter Halbstunde (mit time_range Parameter!)
+- **Audio-Player:** Embedded HTML/JS Player mit `prepare_detection_audio_simple()`
+  - Kein TTS (nur Fade + LUFS + Compression)
+  - PM-Buffer fest auf 0.5s
+  - MP3-Format
+  - Sequential Playback
+
+**Session State (page3_* für Isolation von Page 2):**
+```python
+filter_species: str                  # Geteilt mit anderen Pages
+page3_filter_date_from: date        # Isoliert von Page 2
+page3_filter_date_to: date          # Isoliert von Page 2
+page3_filter_confidence: str        # "All" oder "XX%"
+heatmap_colormap: str               # "inferno" (Default), "viridis", etc.
+heatmap_weight_confidence: bool     # True = sum(conf), False = count
+heatmap_filters_applied: bool       # Trigger für Query
+```
+
+**Filter-Defaults:**
+- Datum: Min/Max aus DB (wie Page 2)
+- Confidence: "70%"
+- Species: Leer (All species)
+- Colormap: "inferno"
+- Weight by Confidence: True
+
+**Daten-Aggregation:**
+1. **Detections laden:** Alle Detections im gewählten Datums-/Confidence-Bereich
+2. **Aggregation:** GroupBy (date, halfhour_idx) mit sum(confidence) oder count
+3. **Long-Form-Data:** Alle Kombinationen (48 halfhours × N dates) mit Nullen für leere Zellen
+4. **Altair-Chart:** rect-Mark mit conditional color (weiß für Null, Colormap für Werte)
+
+**Besonderheiten:**
+- **Achsen-Labels:** Nur Montags-Daten (X) und 3-Stunden-Intervalle (Y) beschriftet
+- **Tooltips:** Hover zeigt Date, Time, Value, Count, Avg Confidence
+- **Colorscale:** Domain startet bei 0.01 (nicht 0) für bessere Farbkontraste
+- **MIN_COLORSCALE_MAX:** Mindestens 10 als Max-Wert (auch wenn Daten kleiner)
+- **HEATMAP_CELL_SIZE:** 12 Pixel (square cells)
+
+**Export:**
+- **PNG:** Via Altair's `save()` Methode (benötigt altair_saver + pillow)
+- **CSV:** Pivot-Table mit Zeit als Rows, Daten als Columns
+
+**Audio im Dialog:**
+- Nutzt `prepare_detection_audio_simple()` → keine TTS-Ansagen
+- PM-Buffer: 0.5s (fest)
+- Format: MP3 (192k bitrate)
+- Base64-encoded für Embedding im HTML
+- Sequential Playback mit Auto-Advance
+
+[ENDE_DER_EINFÜGUNG]
+
+================================================================================================
+ÄNDERUNG 8: Page 2 - Xeno-Canto Button dokumentieren
+================================================================================================
+
+POSITION: In Abschnitt "5.4 birdnet_play/pages/ - Streamlit Pages"
+SUCHEN NACH dem Unterabschnitt "#### **2_audio_player.py**"
+SUCHEN NACH der Beschreibung "**Sections:**" oder "**Layout:**"
+
+[EINFÜGEN in die Layout-Beschreibung, nach dem Species-Filter:]
+
+│  │ Search Filters                                │ │
+│  │ - Species (mit Autocomplete)                  │ │
+│  │   + Xeno-Canto Button (Link zu Recordings)   │ │
+
+[ENDE_DER_EINFÜGUNG]
+
+ZUSÄTZLICH EINFÜGEN in die Feature-Liste von Page 2:
+
+**Neue Features:**
+- **Xeno-Canto Integration:** Link-Button öffnet Species-Recordings in neuem Tab
+- **Autocomplete Search:** streamlit_searchbox für Species-Suche
+- **Clear-Button:** Species-Filter kann zurückgesetzt werden
+
+[ENDE_DER_EINFÜGUNG]
+
+================================================================================================
+ÄNDERUNG 9: Wichtige Konzepte - prepare_detection_audio_simple() dokumentieren
+================================================================================================
+
+POSITION: In Abschnitt "6. Wichtige Konzepte"
+SUCHEN NACH dem Unterabschnitt "6.3 Audio-Processing-Pipeline"
+NACH dem kompletten Abschnitt über die Pipeline
+
+[EINFÜGEN als neuen Unterabschnitt "6.4":]
+
+### 6.4 Einfaches Audio für Heatmap (ohne TTS)
+
+**Funktion:** `prepare_detection_audio_simple()`
+
+**Zweck:** Schnelles Audio-Playback für Heatmap-Dialog ohne TTS-Overhead.
+
+**Pipeline:**
+```
+1. Extract Snippet (mit PM-Buffer)
+   ↓
+2. Process Audio Frame (Fade + LUFS + Compression)
+   ↓
+3. Add 0.5s Silence am Anfang
+   ↓
+4. Export als MP3 (192k bitrate)
+```
+
+**Unterschiede zu prepare_detection_audio_web():**
+- ❌ Keine TTS-Ansagen
+- ❌ Kein audio_options Dict
+- ❌ Kein filter_context
+- ✅ Nur Fade + LUFS + Compression
+- ✅ Fester PM-Buffer (0.5s)
+- ✅ Kürzere Pause (0.5s statt 1.0s)
+
+**Verwendung:**
+Nur in Heatmap-Dialog (`3_heatmap_alaltair.py`)
+
+**Vorteile:**
+- Schnellere Generierung (kein TTS-API-Call)
+- Kleinere Dateien
+- Konsistente Länge (ca. 4-5s pro Detection)
+
+[ENDE_DER_EINFÜGUNG]
+
+WICHTIG: Die bisherige Nummerierung der Unterabschnitte in Kapitel 6 muss entsprechend 
+angepasst werden (6.4 → 6.5, 6.5 → 6.6, 6.6 → 6.7).
+
+================================================================================================
+ÄNDERUNG 10: Neue Dependencies in pyproject.toml
+================================================================================================
+
+POSITION: In Abschnitt "2.1 Core Technologies" (bereits in ÄNDERUNG 2 teilweise erfasst)
+ZUSÄTZLICH in Abschnitt "3.2 Entry Points (pyproject.toml)"
+
+[EINFÜGEN nach der Beschreibung der Entry Points:]
+
+**Neue Dependencies (ab Version 0.2.0):**
+```toml
+[tool.poetry.dependencies]
+# ... existing dependencies ...
+streamlit-searchbox = "^0.1.0"  # Species autocomplete
+altair = "^5.0.0"                # Heatmap visualization
+```
+
+[ENDE_DER_EINFÜGUNG]
+
+================================================================================================
+ÄNDERUNG 11: Changelog erweitern
+================================================================================================
+
+POSITION: In Abschnitt "13. Changelog & Version-Historie"
+SUCHEN NACH "### Version 0.2.0 (aktuell - Januar 2026)"
+
+[ERSETZEN den kompletten Abschnitt "Version 0.2.0" durch:]
+
+### Version 0.2.0 (aktuell - Januar 2026)
+- **Neue Page:** Activity Heatmap (Altair-basiert)
+  - 2D-Visualisierung: Datum × Tageszeit (30-Min-Intervalle)
+  - Interaktive Zell-Auswahl mit Audio-Dialog
+  - 16 Colormap-Optionen
+  - Export als PNG/CSV
+- **Audio-Processing-Pipeline:** Fade, LUFS-Normalisierung, Compression
+- **Species-List:** Intelligente Sortierung mit Score (confidence^4)
+- **AG Grid Integration** für Species-Übersicht
+- **TTS-Optionen erweitert:** Speech Speed, Loudness
+- **Session State Management** verbessert
+- **Auto-create species_list** beim DB-Öffnen
+- **Neue Audio-Funktion:** `prepare_detection_audio_simple()` (ohne TTS)
+- **Species Autocomplete:** streamlit_searchbox Integration
+- **Xeno-Canto Integration:** Link-Button zu Recordings
+- **time_range Filter:** Präzise Tageszeit-Filterung in Queries
+- **Breaking Change:** `extract_snippet()` gibt jetzt Tuple zurück: `(audio_data, sample_rate)`
+
+[ENDE_DER_EINFÜGUNG]
+
+================================================================================================
+ÄNDERUNG 12: Zusammenfassung aktualisieren
+================================================================================================
+
+POSITION: In Abschnitt "14. Zusammenfassung für schnellen Einstieg"
+SUCHEN NACH "2. **Struktur:** 3 Module"
+
+[ERSETZEN durch:]
+
+2. **Struktur:** 3 Module - `birdnet_walker/` (Analyse), `birdnet_play/` (Playback + Heatmap), `shared/` (Common)
+
+[ENDE_DER_EINFÜGUNG]
+
+SUCHEN NACH "4. **UI:** Streamlit mit 2 Pages"
+
+[ERSETZEN durch:]
+
+4. **UI:** Streamlit mit 3 Pages - (1) DB Overview + Species List, (2) Audio Player + Filter, (3) Activity Heatmap
+
+[ENDE_DER_EINFÜGUNG]
+
+================================================================================================
+ÄNDERUNG 13: filters.py - shuffle entfernt
+================================================================================================
+
+POSITION: In Abschnitt "5.3 birdnet_play/ - Audio-Playback & Web-Interface"
+SUCHEN NACH dem Unterabschnitt "#### **filters.py**"
+SUCHEN NACH der Beschreibung der Attribute in DetectionFilter
+
+Falls irgendwo "shuffle" erwähnt wird:
+
+[ENTFERNEN alle Erwähnungen von "shuffle"]
+
+Stattdessen sicherstellen, dass nur diese Attribute dokumentiert sind:
+- detection_id
+- species
+- date_from, date_to
+- time_start, time_end
+- min_confidence
+- limit, offset
+- sort_by, sort_order
+- pm_seconds
+- use_sci
+
+[ENDE_DER_ÄNDERUNG]
+
+================================================================================================
+ZUSÄTZLICHE HINWEISE
+================================================================================================
+
+1. **Breaking Changes:**
+   - `extract_snippet()` gibt jetzt Tuple zurück: `(audio_data, sample_rate)`
+   - Alle Aufrufer müssen angepasst werden!
+
+2. **Neue externe Dependency:**
+   - `streamlit-searchbox` für Autocomplete
+   - `altair` für Heatmap
+
+3. **Session State Namespacing:**
+   - Page 2: `page2_filter_*`
+   - Page 3: `page3_filter_*`
+   - `filter_species` wird zwischen Pages geteilt
+
+4. **Heatmap Performance:**
+   - Bei großen Datensätzen (>10.000 Detections) kann die Aggregation langsam werden
+   - Dialog limitiert auf max. 25 Detections
+
+5. **Export-Anforderungen:**
+   - PNG-Export benötigt: `pip install altair_saver pillow`
+   - Ohne diese Packages: Export schlägt fehl mit Info-Message
+
+================================================================================================
+ENDE DER DOKUMENTATIONS-ÄNDERUNGEN
+================================================================================================
