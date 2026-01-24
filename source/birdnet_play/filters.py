@@ -100,20 +100,22 @@ class DetectionFilter:
     
     def validate(self) -> Optional[str]:
         """
-        Validate filter parameters.
+        Validate filter parameters using datetime combination.
         
         Returns:
             Error message if invalid, None if valid
         """
-        # Date validation
+        # DateTime validation (combines date + time)
         if self.date_from and self.date_to:
-            if self.date_from > self.date_to:
-                return "date_from must be <= date_to"
-        
-        # Time validation
-        if self.time_start and self.time_end:
-            if self.time_start > self.time_end:
-                return "time_start must be <= time_end"
+            # Combine date + time to datetime objects
+            time_start = self.time_start if self.time_start else dt_time(0, 0, 0)
+            time_end = self.time_end if self.time_end else dt_time(23, 59, 59)
+            
+            datetime_start = datetime.combine(self.date_from, time_start)
+            datetime_end = datetime.combine(self.date_to, time_end)
+            
+            if datetime_end <= datetime_start:
+                return "End date/time must be after start date/time"
         
         # Confidence validation
         if self.min_confidence is not None:
