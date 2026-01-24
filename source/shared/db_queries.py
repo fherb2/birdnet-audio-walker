@@ -465,21 +465,28 @@ def query_detections(
             pattern = f"%{species}%"
             params.extend([pattern, pattern, pattern])
         
-        # Date filters
+        # DateTime range filter (combines date + time)
         if date_from:
-            query += " AND date(d.segment_start_local) >= date(?)"
-            params.append(date_from.isoformat())
+            # If time_range given, use it; otherwise start at 00:00:00
+            if time_range:
+                start_time = time_range[0]
+            else:
+                start_time = time(0, 0, 0)
+            
+            datetime_start = datetime.combine(date_from.date() if isinstance(date_from, datetime) else date_from, start_time)
+            query += " AND d.segment_start_local >= ?"
+            params.append(datetime_start.isoformat())
         
         if date_to:
-            query += " AND date(d.segment_start_local) <= date(?)"
-            params.append(date_to.isoformat())
-        
-        # Time of day filter
-        if time_range:
-            start_time, end_time = time_range
-            query += " AND time(d.segment_start_local) BETWEEN time(?) AND time(?)"
-            params.append(start_time.isoformat())
-            params.append(end_time.isoformat())
+            # If time_range given, use it; otherwise end at 23:59:59
+            if time_range:
+                end_time = time_range[1]
+            else:
+                end_time = time(23, 59, 59)
+            
+            datetime_end = datetime.combine(date_to.date() if isinstance(date_to, datetime) else date_to, end_time)
+            query += " AND d.segment_start_local <= ?"
+            params.append(datetime_end.isoformat())
         
         # Confidence filter
         if min_confidence is not None:

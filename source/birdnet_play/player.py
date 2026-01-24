@@ -520,6 +520,72 @@ class AudioPlayer:
         )
         
         return mp3_bytes
+    
+
+
+    def prepare_detection_audio_simple(
+        self,
+        detection: Dict,
+        pm_seconds: float = 0.5
+    ) -> BytesIO:
+        """
+        Prepare simple audio for heatmap dialog - no TTS, just fade.
+        
+        Combines:
+        - 0.5s initial pause
+        - PM buffer before detection
+        - 3s detection audio
+        - PM buffer after detection
+        
+        Args:
+            detection: Detection dict with metadata
+            pm_seconds: Plus/minus seconds around detection (default: 0.5)
+            
+        Returns:
+            BytesIO containing MP3 audio data
+        """
+        from pydub import AudioSegment
+        import numpy as np
+        
+        # Calculate offsets
+        start_offset, end_offset = calculate_snippet_offsets(detection, pm_seconds)
+        
+        # Get WAV path
+        wav_path = self.db_path.parent / detection['filename']
+        
+        if not wav_path.exists():
+            raise FileNotFoundError(f"WAV file not found: {wav_path}")
+        
+        # Extract audio snippet (returns tuple: audio_data, sample_rate)
+        audio_samples, sample_rate = extract_snippet(wav_path, start_offset, end_offset)
+        
+        # Process audio (fade + LUFS + compressor)
+        # Returns int16 array
+        processed_samples = self._process_audio_frame(audio_samples, sample_rate)
+        
+        # Convert to pydub AudioSegment (processed_samples is already int16)
+        audio_segment = AudioSegment(
+            processed_samples.tobytes(),
+            frame_rate=sample_rate,
+            sample_width=2,
+            channels=1
+        )
+        
+        # Add 0.5s silence at start
+        silence = AudioSegment.silent(duration=500, frame_rate=sample_rate)
+        final_audio = silence + audio_segment
+        
+        # Export as MP3
+        mp3_buffer = BytesIO()
+        final_audio.export(
+            mp3_buffer,
+            format='mp3',
+            bitrate='192k',
+            parameters=['-q:a', '2']
+        )
+        mp3_buffer.seek(0)
+        
+        return mp3_buffer
 
 
 
