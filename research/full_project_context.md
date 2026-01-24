@@ -78,6 +78,8 @@ Identifikation von Besonderheiten/seltenen Arten
 **Web-Interface:**
 - Streamlit 1.53.0+
 - streamlit-aggrid für interaktive Tabellen
+- streamlit-searchbox für Species-Autocomplete
+- Altair für interaktive Visualisierungen (Heatmap)
 
 **Utilities:**
 - Loguru für strukturiertes Logging
@@ -140,6 +142,8 @@ birdnet-walker/
         └── pages/              # Streamlit Multi-Page App
             ├── 1_database_overview.py  # DB-Auswahl, Metadata, Species-Liste
             └── 2_audio_player.py       # Filter, Audio-Player, Export
+        └── 3_heatmap_alaltair.py   # Activity Heatmap (Altair-Version)
+
 ```
 
 ### 3.2 Entry Points (pyproject.toml)
@@ -148,6 +152,14 @@ birdnet-walker/
 [tool.poetry.scripts]
 birdnet-walker = "birdnet_walker.main:main"  # Batch-Analyse
 birdnet-play = "birdnet_play.cli:main"       # Playback (CLI oder --ui)
+```
+
+**Neue Dependencies (ab Version 24.1.26):**
+```toml
+[tool.poetry.dependencies]
+# ... existing dependencies ...
+streamlit-searchbox = "^0.1.0"  # Species autocomplete
+altair = "^5.0.0"                # Heatmap visualization
 ```
 
 **Verwendung:**
@@ -338,10 +350,13 @@ CONFIDENCE_THRESHOLD_HIGH = 0.7  # Schwelle für "gute" Detections
 - `get_species_list_with_counts()` - Lädt vollständige Species-Liste
 - `format_score_with_two_significant_digits()` - Score-Formatierung
 - `format_detections_column()` - Formatiert Detections-Spalte
+- `search_species_in_list()` - Autocomplete-Suche für Species (für streamlit_searchbox)
+
 
 **Filter-Parameter für `query_detections()`:**
 - `species` - Teilstring-Suche in scientific/local/Czech name
 - `date_from/date_to` - Datum-Range
+- `time_range` - Tuple (start_time, end_time) für Tageszeit-Filter (kombiniert mit date_from/date_to)
 - `time_range` - Tuple (start_time, end_time) für Tageszeit
 - `min_confidence` - Minimum Confidence
 - `limit/offset` - Pagination
@@ -353,7 +368,7 @@ CONFIDENCE_THRESHOLD_HIGH = 0.7  # Schwelle für "gute" Detections
 
 **Hauptfunktionen:**
 - `calculate_snippet_offsets(detection, pm_seconds)` - Berechnet Start/End mit PM-Buffer
-- `extract_snippet(wav_path, start, end)` - Extrahiert Audio als numpy array
+- `extract_snippet(wav_path, start, end)` - Extrahiert Audio → **Gibt Tuple zurück: (audio_data, sample_rate)**
 
 **PM-Buffer (Plus/Minus):** Erweitert 3s-Segment um X Sekunden vor/nach, automatisch geclippt an File-Grenzen.
 
@@ -420,6 +435,7 @@ CONFIDENCE_THRESHOLD_HIGH = 0.7  # Schwelle für "gute" Detections
 **Hauptmethoden:**
 - `prepare_detection_audio(...)` - Kombiniert Audio für WAV-Export
 - `prepare_detection_audio_web(...)` - Kombiniert Audio für Web (MP3)
+- `prepare_detection_audio_simple(...)` - Einfaches Audio ohne TTS (für Heatmap-Dialog)
 - `_get_announcement_text(...)` - Generiert TTS-Text basierend auf Optionen
 - `_process_audio_frame(...)` - Audio-Processing-Pipeline
 
@@ -572,13 +588,20 @@ class DetectionFilter:
 #### **2_audio_player.py**
 **Zweck:** Filter, Audio-Player, Export.
 
+**Neue Features:**
+- **Xeno-Canto Integration:** Link-Button öffnet Species-Recordings in neuem Tab
+- **Autocomplete Search:** streamlit_searchbox für Species-Suche
+- **Clear-Button:** Species-Filter kann zurückgesetzt werden
+
+
 **Layout:**
 ```
 ┌─────────────────────────────────────────────────────┐
 │  Main Area                                          │
 │  ┌───────────────────────────────────────────────┐ │
 │  │ 🔍 Search Filters                             │ │
-│  │ - Species                                     │ │
+│  │ - Species (mit Autocomplete)                  │ │
+│  │   + Xeno-Canto Button (Link zu Recordings)   │ │
 │  │ - Date From/To                                │ │
 │  │ - Time Range (optional)                       │ │
 │  │ - Min Confidence                              │ │
@@ -693,6 +716,100 @@ def calculate_outputs_per_minute(single_length):
     return 60.0 / single_length
 ```
 
+#### **3_heatmap_alaltair.py**
+**Zweck:** Activity Heatmap - Zeitliche Verteilung von Detections visualisieren.
+
+**Hauptfunktionalität:**
+- **Altair-basierte Heatmap:** 2D-Visualisierung mit Datum (X-Achse) und Tageszeit (Y-Achse, 30-Min-Intervalle)
+- **Interaktive Zell-Auswahl:** Click-Handler öffnet Dialog mit Detections der gewählten Halbstunde
+- **Embedded Audio-Player:** Spielt Detections direkt im Dialog (ohne TTS)
+- **Flexible Farbskalen:** 16 verschiedene Colormaps (inferno, viridis, plasma, etc.)
+- **Gewichtungs-Modi:** Sum of Confidences oder Count
+- **Export-Funktionen:** PNG und CSV
+
+**Layout:**
+```
+┌─────────────────────────────────────────────────────┐
+│  Sidebar: Heatmap Options                          │
+│  - Colormap Selection (16 Optionen)                │
+│  - Weight by Confidence (Checkbox)                 │
+│  - Guide (Info-Box)                                │
+└─────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────┐
+│  Main Area                                          │
+│  ┌───────────────────────────────────────────────┐ │
+│  │ 🔍 Search Filters                             │ │
+│  │ - Species (mit Autocomplete + Xeno-Canto)    │ │
+│  │ - Date From/To                                │ │
+│  │ - Min Confidence                              │ │
+│  │ [🔍 Apply Filters]                            │ │
+│  └───────────────────────────────────────────────┘ │
+│                                                     │
+│  ┌───────────────────────────────────────────────┐ │
+│  │ 📊 Activity Heatmap (Altair Chart)            │ │
+│  │ - X-Axis: Dates (Labels nur Montags)         │ │
+│  │ - Y-Axis: 48 Half-Hours (Labels alle 3h)     │ │
+│  │ - Click → Dialog                              │ │
+│  └───────────────────────────────────────────────┘ │
+│                                                     │
+│  [💾 Export PNG] [💾 Export CSV]                   │
+└─────────────────────────────────────────────────────┘
+```
+
+**Dialog-Funktion `show_play_dialog()`:**
+Öffnet bei Zell-Click ein Modal mit:
+- **Metadaten:** Datum, Zeit, Species-Filter, Cell-Stats (Count, Total Conf, Avg Conf)
+- **Query:** Lädt max. 25 Detections aus gewählter Halbstunde (mit time_range Parameter!)
+- **Audio-Player:** Embedded HTML/JS Player mit `prepare_detection_audio_simple()`
+  - Kein TTS (nur Fade + LUFS + Compression)
+  - PM-Buffer fest auf 0.5s
+  - MP3-Format
+  - Sequential Playback
+
+**Session State (page3_* für Isolation von Page 2):**
+```python
+filter_species: str                  # Geteilt mit anderen Pages
+page3_filter_date_from: date        # Isoliert von Page 2
+page3_filter_date_to: date          # Isoliert von Page 2
+page3_filter_confidence: str        # "All" oder "XX%"
+heatmap_colormap: str               # "inferno" (Default), "viridis", etc.
+heatmap_weight_confidence: bool     # True = sum(conf), False = count
+heatmap_filters_applied: bool       # Trigger für Query
+```
+
+**Filter-Defaults:**
+- Datum: Min/Max aus DB (wie Page 2)
+- Confidence: "70%"
+- Species: Leer (All species)
+- Colormap: "inferno"
+- Weight by Confidence: True
+
+**Daten-Aggregation:**
+1. **Detections laden:** Alle Detections im gewählten Datums-/Confidence-Bereich
+2. **Aggregation:** GroupBy (date, halfhour_idx) mit sum(confidence) oder count
+3. **Long-Form-Data:** Alle Kombinationen (48 halfhours × N dates) mit Nullen für leere Zellen
+4. **Altair-Chart:** rect-Mark mit conditional color (weiß für Null, Colormap für Werte)
+
+**Besonderheiten:**
+- **Achsen-Labels:** Nur Montags-Daten (X) und 3-Stunden-Intervalle (Y) beschriftet
+- **Tooltips:** Hover zeigt Date, Time, Value, Count, Avg Confidence
+- **Colorscale:** Domain startet bei 0.01 (nicht 0) für bessere Farbkontraste
+- **MIN_COLORSCALE_MAX:** Mindestens 10 als Max-Wert (auch wenn Daten kleiner)
+- **HEATMAP_CELL_SIZE:** 12 Pixel (square cells)
+
+**Export:**
+- **PNG:** Via Altair's `save()` Methode (benötigt altair_saver + pillow)
+- **CSV:** Pivot-Table mit Zeit als Rows, Daten als Columns
+
+**Audio im Dialog:**
+- Nutzt `prepare_detection_audio_simple()` → keine TTS-Ansagen
+- PM-Buffer: 0.5s (fest)
+- Format: MP3 (192k bitrate)
+- Base64-encoded für Embedding im HTML
+- Sequential Playback mit Auto-Advance
+
+
 ---
 
 ## 6. Wichtige Konzepte
@@ -774,7 +891,40 @@ COMPRESSOR_THRESHOLD_DB = -20.0  # Ab wann komprimieren
 COMPRESSOR_RATIO = 4.0           # Wie stark (4:1 = moderat)
 ```
 
-### 6.4 Species-Sortierung (Score)
+### 6.4 Einfaches Audio für Heatmap (ohne TTS)
+
+**Funktion:** `prepare_detection_audio_simple()`
+
+**Zweck:** Schnelles Audio-Playback für Heatmap-Dialog ohne TTS-Overhead.
+
+**Pipeline:**
+```
+1. Extract Snippet (mit PM-Buffer)
+   ↓
+2. Process Audio Frame (Fade + LUFS + Compression)
+   ↓
+3. Add 0.5s Silence am Anfang
+   ↓
+4. Export als MP3 (192k bitrate)
+```
+
+**Unterschiede zu prepare_detection_audio_web():**
+- ❌ Keine TTS-Ansagen
+- ❌ Kein audio_options Dict
+- ❌ Kein filter_context
+- ✅ Nur Fade + LUFS + Compression
+- ✅ Fester PM-Buffer (0.5s)
+- ✅ Kürzere Pause (0.5s statt 1.0s)
+
+**Verwendung:**
+Nur in Heatmap-Dialog (`3_heatmap_alaltair.py`)
+
+**Vorteile:**
+- Schnellere Generierung (kein TTS-API-Call)
+- Kleinere Dateien
+- Konsistente Länge (ca. 4-5s pro Detection)
+
+### 6.5 Species-Sortierung (Score)
 
 **Formel:** `score = SUM(confidence^4)`
 
@@ -807,7 +957,7 @@ Art B: 100x @ 0.3 conf → score = 100 × 0.3^4 ≈ 0.81
 CONFIDENCE_THRESHOLD_HIGH = 0.7  # In db_queries.py (oben)
 ```
 
-### 6.5 Session State & Caching
+### 6.6 Session State & Caching
 
 **Problem:** Streamlit rerunnt bei jedem Interaction.
 
@@ -835,7 +985,7 @@ st.session_state[cache_key] = audio_files
 - Bei Audio-Settings-Änderung (`audio_settings_applied = True`)
 - Manuell via Button "Clear Audio Cache"
 
-### 6.6 Multi-Language Support
+### 6.7 Multi-Language Support
 
 **Ebenen:**
 
@@ -1341,13 +1491,24 @@ Wenn größere Änderungen gemacht werden, hier dokumentieren:
 - BirdNET Play: CLI + Streamlit UI
 - Grundfunktionalität: Filter, Playback, Export
 
-### Version 0.2.0 (aktuell - Januar 2026)
-- Audio-Processing-Pipeline (Fade, LUFS, Compression)
-- Species-List mit intelligenter Sortierung (Score)
-- AG Grid Integration
-- TTS-Optionen erweitert (Speech Speed, Loudness)
-- Session State Management verbessert
-- Auto-create species_list beim DB-Öffnen
+### Version 0.2.0 (aktuell - 24. Januar 2026)
+- **Neue Page:** Activity Heatmap (Altair-basiert)
+  - 2D-Visualisierung: Datum × Tageszeit (30-Min-Intervalle)
+  - Interaktive Zell-Auswahl mit Audio-Dialog
+  - 16 Colormap-Optionen
+  - Export als PNG/CSV
+- **Audio-Processing-Pipeline:** Fade, LUFS-Normalisierung, Compression
+- **Species-List:** Intelligente Sortierung mit Score (confidence^4)
+- **AG Grid Integration** für Species-Übersicht
+- **TTS-Optionen erweitert:** Speech Speed, Loudness
+- **Session State Management** verbessert
+- **Auto-create species_list** beim DB-Öffnen
+- **Neue Audio-Funktion:** `prepare_detection_audio_simple()` (ohne TTS)
+- **Species Autocomplete:** streamlit_searchbox Integration
+- **Xeno-Canto Integration:** Link-Button zu Recordings
+- **time_range Filter:** Präzise Tageszeit-Filterung in Queries
+- **Breaking Change:** `extract_snippet()` gibt jetzt Tuple zurück: `(audio_data, sample_rate)`
+
 
 ---
 
@@ -1356,9 +1517,9 @@ Wenn größere Änderungen gemacht werden, hier dokumentieren:
 **Wenn du nur 5 Minuten hast:**
 
 1. **Projekt:** Vogelstimmen-Analyse mit BirdNET + Playback-UI
-2. **Struktur:** 3 Module - `birdnet_walker/` (Analyse), `birdnet_play/` (Playback), `shared/` (Common)
+2. **Struktur:** 3 Module - `birdnet_walker/` (Analyse), `birdnet_play/` (Playback + Heatmap), `shared/` (Common)
 3. **Datenbank:** Eine SQLite-DB pro Ordner mit 5 Tabellen (metadata, detections, processing_status, analysis_config, species_list)
-4. **UI:** Streamlit mit 2 Pages - (1) DB Overview + Species List, (2) Audio Player + Filter
+4. **UI:** Streamlit mit 3 Pages - (1) DB Overview + Species List, (2) Audio Player + Filter, (3) Activity Heatmap
 5. **Audio:** Extraktion + Processing (Fade, LUFS, Compression) + TTS + Sequential Playback
 
 **Wichtigste Files für Änderungen:**
