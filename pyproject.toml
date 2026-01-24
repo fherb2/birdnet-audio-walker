@@ -29,6 +29,10 @@ pedalboard = "^0.9.0"
 pyloudnorm = "^0.1.1"  
 streamlit-aggrid = "^0.3.4"
 streamlit-searchbox = "^0.1.13"
+kaleido = "^1.2.0"
+plotly = "^6.5.2"
+streamlit-plotly-events = "^0.0.6"
+altair = "^6.0.0"
 
 
 [tool.poetry.scripts]

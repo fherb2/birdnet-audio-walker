@@ -57,29 +57,28 @@ st.divider()
 # =============================================================================
 
 def init_filter_state():
-    """Initialize filter session state with defaults."""
+    """Initialize filter session state with defaults for Page 2."""
     if 'filter_species' not in st.session_state:
         st.session_state['filter_species'] = ""
-    if 'filter_date_from' not in st.session_state or 'filter_date_to' not in st.session_state:
-        # Set date range from database (not current date!)
+    if 'page2_filter_date_from' not in st.session_state or 'page2_filter_date_to' not in st.session_state:
         from shared.db_queries import get_recording_date_range
         min_date, max_date = get_recording_date_range(db_path)
-        st.session_state['filter_date_from'] = min_date.date() if min_date else None
-        st.session_state['filter_date_to'] = max_date.date() if max_date else None
-    if 'filter_use_time' not in st.session_state:
-        st.session_state['filter_use_time'] = False
-    if 'filter_time_start' not in st.session_state:
-        st.session_state['filter_time_start'] = dt_time(0, 0)
-    if 'filter_time_end' not in st.session_state:
-        st.session_state['filter_time_end'] = dt_time(23, 59)
-    if 'filter_confidence' not in st.session_state:
-        st.session_state['filter_confidence'] = "70%"
-    if 'filter_limit' not in st.session_state:
-        st.session_state['filter_limit'] = 25
-    if 'filter_offset' not in st.session_state:
-        st.session_state['filter_offset'] = 0
-    if 'filter_sort' not in st.session_state:
-        st.session_state['filter_sort'] = "time"
+        st.session_state['page2_filter_date_from'] = min_date.date() if min_date else None
+        st.session_state['page2_filter_date_to'] = max_date.date() if max_date else None
+    if 'page2_filter_use_time' not in st.session_state:
+        st.session_state['page2_filter_use_time'] = False
+    if 'page2_filter_time_start' not in st.session_state:
+        st.session_state['page2_filter_time_start'] = dt_time(0, 0, 0)
+    if 'page2_filter_time_end' not in st.session_state:
+        st.session_state['page2_filter_time_end'] = dt_time(23, 59, 59)
+    if 'page2_filter_confidence' not in st.session_state:
+        st.session_state['page2_filter_confidence'] = "70%"
+    if 'page2_filter_limit' not in st.session_state:
+        st.session_state['page2_filter_limit'] = 25
+    if 'page2_filter_offset' not in st.session_state:
+        st.session_state['page2_filter_offset'] = 0
+    if 'page2_filter_sort' not in st.session_state:
+        st.session_state['page2_filter_sort'] = "time"
 
 
 def init_audio_state():
@@ -165,7 +164,7 @@ with col2:
             "🔊 Xeno-Canto",
             xc_url,
             help=f"Open {species_for_xc} in Xeno-Canto (new tab)",
-            use_container_width=True
+            width='stretch'
         )
     else:
         # Disabled placeholder when no species selected
@@ -173,7 +172,7 @@ with col2:
             "🔊 Xeno-Canto",
             disabled=True,
             help="Select a species first",
-            use_container_width=True
+            width='stretch'
         )
 
 # Date filters
@@ -181,26 +180,31 @@ col1, col2, col3 = st.columns(3)
 with col1:
     date_from = st.date_input(
         "Date From",
-        value=st.session_state['filter_date_from'],
+        value=st.session_state['page2_filter_date_from'],
         key="input_date_from"
     )
-    st.session_state['filter_date_from'] = date_from
+    st.session_state['page2_filter_date_from'] = date_from
 
 with col2:
     date_to = st.date_input(
         "Date To",
-        value=st.session_state['filter_date_to'],
+        value=st.session_state['page2_filter_date_to'],
         key="input_date_to"
     )
-    st.session_state['filter_date_to'] = date_to
+    st.session_state['page2_filter_date_to'] = date_to
 
 with col3:
     use_time_filter = st.checkbox(
         "Enable Time Filter",
-        value=st.session_state['filter_use_time'],
+        value=st.session_state['page2_filter_use_time'],
         key="input_use_time"
     )
-    st.session_state['filter_use_time'] = use_time_filter
+    st.session_state['page2_filter_use_time'] = use_time_filter
+    
+    # Reset times to full day range when disabled
+    if not use_time_filter:
+        st.session_state['page2_filter_time_start'] = dt_time(0, 0, 0)
+        st.session_state['page2_filter_time_end'] = dt_time(23, 59, 59)
 
 # Time filters (if enabled)
 if use_time_filter:
@@ -208,26 +212,19 @@ if use_time_filter:
     with col1:
         time_start = st.time_input(
             "Time Start",
-            value=st.session_state['filter_time_start'],
+            value=st.session_state['page2_filter_time_start'],
             key="input_time_start"
         )
-        st.session_state['filter_time_start'] = time_start
+        st.session_state['page2_filter_time_start'] = time_start
     
     with col2:
         time_end = st.time_input(
             "Time End",
-            value=st.session_state['filter_time_end'],
+            value=st.session_state['page2_filter_time_end'],
             key="input_time_end"
         )
-        st.session_state['filter_time_end'] = time_end
+        st.session_state['page2_filter_time_end'] = time_end
     
-    # Auto-correct: time_end >= time_start + 1 minute
-    if time_start and time_end:
-        dt_start = datetime.combine(datetime.today(), time_start)
-        dt_end = datetime.combine(datetime.today(), time_end)
-        if dt_end < dt_start + timedelta(minutes=1):
-            time_end = (dt_start + timedelta(minutes=1)).time()
-            st.session_state['filter_time_end'] = time_end
 
 # Confidence, Limit, Offset
 col1, col2, col3, col4 = st.columns(4)
@@ -235,8 +232,8 @@ col1, col2, col3, col4 = st.columns(4)
 with col1:
     conf_options = ["All"] + [f"{i}%" for i in range(5, 100, 5)]
     current_conf_idx = 0
-    if st.session_state['filter_confidence'] in conf_options:
-        current_conf_idx = conf_options.index(st.session_state['filter_confidence'])
+    if st.session_state['page2_filter_confidence'] in conf_options:
+        current_conf_idx = conf_options.index(st.session_state['page2_filter_confidence'])
     
     conf_selected = st.selectbox(
         "Min Confidence",
@@ -244,27 +241,27 @@ with col1:
         index=current_conf_idx,
         key="input_confidence"
     )
-    st.session_state['filter_confidence'] = conf_selected
+    st.session_state['page2_filter_confidence'] = conf_selected
 
 with col2:
     limit = st.number_input(
         "Limit",
         min_value=1,
         max_value=1000,
-        value=st.session_state['filter_limit'],
+        value=st.session_state['page2_filter_limit'],
         key="input_limit"
     )
-    st.session_state['filter_limit'] = limit
+    st.session_state['page2_filter_limit'] = limit
 
 with col3:
     offset = st.number_input(
         "Offset",
         min_value=0,
-        value=st.session_state['filter_offset'],
+        value=st.session_state['page2_filter_offset'],
         step=10,
         key="input_offset"
     )
-    st.session_state['filter_offset'] = offset
+    st.session_state['page2_filter_offset'] = offset
 
 with col4:
     sort_options = {
@@ -272,7 +269,7 @@ with col4:
         "Confidence (high→low)": "confidence", 
         "ID (upwards)": "id"
     }
-    current_sort_label = [k for k, v in sort_options.items() if v == st.session_state['filter_sort']][0]
+    current_sort_label = [k for k, v in sort_options.items() if v == st.session_state['page2_filter_sort']][0]
     
     sort_selected = st.selectbox(
         "Sort By",
@@ -280,7 +277,7 @@ with col4:
         index=list(sort_options.keys()).index(current_sort_label),
         key="input_sort"
     )
-    st.session_state['filter_sort'] = sort_options[sort_selected]
+    st.session_state['page2_filter_sort'] = sort_options[sort_selected]
 
 # Apply Filters Button
 if st.button("🔍 **Apply Filters**", type="primary", width="stretch"):
@@ -399,22 +396,22 @@ if not st.session_state.get('filters_applied', False):
     st.stop()
 
 # Build filter from session state
-min_confidence = None if st.session_state['filter_confidence'] == "All" else \
-    int(st.session_state['filter_confidence'].rstrip('%')) / 100
+min_confidence = None if st.session_state['page2_filter_confidence'] == "All" else \
+    int(st.session_state['page2_filter_confidence'].rstrip('%')) / 100
 
 # Determine sort order based on sort_by
-sort_order = "desc" if st.session_state['filter_sort'] == "confidence" else "asc"
+sort_order = "desc" if st.session_state['page2_filter_sort'] == "confidence" else "asc"
 
 detection_filter = DetectionFilter(
     species=st.session_state['filter_species'] if st.session_state['filter_species'] else None,
-    date_from=datetime.combine(st.session_state['filter_date_from'], dt_time(0, 0)) if st.session_state['filter_date_from'] else None,
-    date_to=datetime.combine(st.session_state['filter_date_to'], dt_time(23, 59)) if st.session_state['filter_date_to'] else None,
-    time_start=st.session_state['filter_time_start'] if st.session_state['filter_use_time'] else None,
-    time_end=st.session_state['filter_time_end'] if st.session_state['filter_use_time'] else None,
+    date_from=datetime.combine(st.session_state['page2_filter_date_from'], dt_time(0, 0)) if st.session_state['page2_filter_date_from'] else None,
+    date_to=datetime.combine(st.session_state['page2_filter_date_to'], dt_time(23, 59)) if st.session_state['page2_filter_date_to'] else None,
+    time_start=st.session_state['page2_filter_time_start'] if st.session_state['page2_filter_use_time'] else None,
+    time_end=st.session_state['page2_filter_time_end'] if st.session_state['page2_filter_use_time'] else None,
     min_confidence=min_confidence,
-    limit=st.session_state['filter_limit'],
-    offset=st.session_state['filter_offset'],
-    sort_by=st.session_state['filter_sort'],
+    limit=st.session_state['page2_filter_limit'],
+    offset=st.session_state['page2_filter_offset'],
+    sort_by=st.session_state['page2_filter_sort'],
     sort_order=sort_order,
     pm_seconds=st.session_state['audio_frame_duration'],
     use_sci=(st.session_state['audio_bird_name'] == "scientific")
