@@ -108,11 +108,12 @@ class DetectionFilter:
         # DateTime validation (combines date + time)
         if self.date_from and self.date_to:
             # Combine date + time to datetime objects
-            time_start = self.time_start if self.time_start else dt_time(0, 0, 0)
-            time_end = self.time_end if self.time_end else dt_time(23, 59, 59)
+            time_start = self.time_start if self.time_start else time(0, 0, 0)
+            time_end = self.time_end if self.time_end else time(23, 59, 59)
             
-            datetime_start = datetime.combine(self.date_from, time_start)
-            datetime_end = datetime.combine(self.date_to, time_end)
+            # date_from/date_to are already datetime objects, extract date part
+            datetime_start = datetime.combine(self.date_from.date(), time_start)
+            datetime_end = datetime.combine(self.date_to.date(), time_end)
             
             if datetime_end <= datetime_start:
                 return "End date/time must be after start date/time"
@@ -169,9 +170,6 @@ class DetectionFilter:
         
         if self.offset > 0:
             parts.append(f"offset={self.offset}")
-        
-        if self.shuffle:
-            parts.append("shuffle=True")
         
         parts.append(f"frame_duration={self.pm_seconds}s")
         parts.append(f"sort={self.sort_by}_{self.sort_order}")

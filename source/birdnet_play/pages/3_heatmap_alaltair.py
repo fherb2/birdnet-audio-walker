@@ -856,7 +856,7 @@ chart = alt.Chart(altair_df).mark_rect(
     grid=False
 )
 
-event = st.altair_chart(chart, use_container_width=False, on_select="rerun", key="heatmap_chart")
+event = st.altair_chart(chart, width='stretch', on_select="rerun", key="heatmap_chart")
 
 if event and 'selection' in event:
     # Altair selection format: event['selection']['param_1']
