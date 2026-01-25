@@ -4,7 +4,7 @@ Database Overview Page - Database selection, metadata, and file list
 
 import streamlit as st
 from pathlib import Path
-from datetime import datetime, time as dt_time
+from datetime import datetime, date, time as dt_time
 import pandas as pd
 from loguru import logger
 
@@ -204,7 +204,7 @@ for meta in metadata_list:
 df = pd.DataFrame(table_data)
 
 # Display table
-st.dataframe(df, use_container_width=True, hide_index=True)
+st.dataframe(df, width='stretch', hide_index=True)
 
 st.divider()
 
@@ -257,6 +257,11 @@ else:
         'name_cs': 'Czech Name'
     })
     
+    # Info hint
+    st.info("👆 Click on a species to select for playing - selection appears in sidebar")
+
+    st.write("")  # Small spacing
+    
     # Build grid options
     gb = GridOptionsBuilder.from_dataframe(df_display)
     
@@ -277,7 +282,8 @@ else:
     gb.configure_default_column(
         sortable=True,
         resizable=True,
-        suppressMenu=True
+        filterable=True,
+        suppressMenu=False
     )
     
     # Initial sort by score (descending - best species first)
@@ -303,17 +309,18 @@ else:
         enable_enterprise_modules=False
     )
     
-    # Handle selection
+    # Handle selection - show in sidebar
     selected = grid_response.get('selected_rows', [])
-    
+
     if selected and len(selected) > 0:
         selected_species = selected[0]['Scientific Name']
         
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            st.info(f"Selected: **{selected_species}**")
-        with col2:
-            if st.button("▶ Play Species", width="stretch", key="play_species_btn"):
+        with st.sidebar:
+            st.divider()
+            st.subheader("🎯 Selected Species")
+            st.markdown(f"**{selected_species}**")
+            
+            if st.button("▶ Play Species", use_container_width=True, key="play_species_btn"):
                 # Get date range from database
                 from shared.db_queries import get_recording_date_range
                 min_date, max_date = get_recording_date_range(db_path)
@@ -333,6 +340,135 @@ else:
                 
                 # Switch to audio player page
                 st.switch_page("pages/2_audio_player.py")
+                
+# Download section
+st.divider()
+st.subheader("📥 Download Species List")
+
+# Radio for download scope
+download_scope = st.radio(
+    "Download scope:",
+    options=["All species", "Only filtered species"],
+    horizontal=True,
+    key="download_scope_species"
+)
+
+# Prepare data based on selection
+if download_scope == "Only filtered species":
+    # Get filtered data from grid
+    download_df = pd.DataFrame(grid_response['data'])
+    # Remove score column (was hidden)
+    if 'score' in download_df.columns:
+        download_df = download_df.drop(columns=['score'])
+    selections_text = "filtered only"
+else:
+    # Use original data (without score)
+    download_df = df_display.drop(columns=['score'])
+    selections_text = "all"
+
+# Get date range and notes for metadata
+from shared.db_queries import get_recording_date_range
+min_date, max_date = get_recording_date_range(db_path)
+date_from_str = min_date.strftime('%Y-%m-%d') if min_date else "N/A"
+date_to_str = max_date.strftime('%Y-%m-%d') if max_date else "N/A"
+
+user_notes = get_analysis_config(db_path, 'user_comment') or ""
+
+col1, col2 = st.columns(2)
+
+with col1:
+    # CSV Download with header
+    from io import StringIO
+    
+    csv_buffer = StringIO()
+    
+    # Write header lines
+    csv_buffer.write(f"File: {db_path}\n")
+    csv_buffer.write(f"Selections: {selections_text}\n")
+    csv_buffer.write(f"From: {date_from_str} To: {date_to_str}\n")
+    csv_buffer.write("\n")  # Empty line
+    
+    # Write table
+    download_df.to_csv(csv_buffer, index=False)
+    
+    csv_data = csv_buffer.getvalue().encode('utf-8')
+    
+    st.download_button(
+        label="📥 Download CSV",
+        data=csv_data,
+        file_name=f"species_list_{db_path.stem}.csv",
+        mime="text/csv",
+        use_container_width=True
+    )
+
+with col2:
+    # Excel Download with 2 sheets
+    from io import BytesIO
+    from openpyxl.utils import get_column_letter
+    
+    buffer = BytesIO()
+    
+    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+        # Sheet 1: Database Info
+        db_info_data = {
+            'Info': [
+                f"File: {db_path}",
+                f"Selections: {selections_text}",
+                f"From: {date_from_str} To: {date_to_str}",
+                "",
+                "Notes:"
+            ]
+        }
+        
+        # Add notes line by line
+        if user_notes:
+            for line in user_notes.split('\n'):
+                db_info_data['Info'].append(line)
+        
+        df_info = pd.DataFrame(db_info_data)
+        df_info.to_excel(writer, sheet_name='Database', index=False, header=False)
+        
+        # Set column width for Database sheet
+        worksheet = writer.sheets['Database']
+        worksheet.column_dimensions['A'].width = 80
+        
+        # Enable text wrapping for notes cells (from row 6 onwards)
+        from openpyxl.styles import Alignment, Border, Side
+        for row in worksheet.iter_rows(min_row=6, max_row=worksheet.max_row, min_col=1, max_col=1):
+            for cell in row:
+                cell.alignment = Alignment(wrap_text=True)
+        
+        # Sheet 2: Species Table
+        download_df.to_excel(writer, sheet_name='Species Table', index=False)
+        
+        # Set column widths for Species Table
+        worksheet_species = writer.sheets['Species Table']
+        worksheet_species.column_dimensions['A'].width = 19  # Scientific Name
+        worksheet_species.column_dimensions['B'].width = 22  # Local Name
+        worksheet_species.column_dimensions['C'].width = 17  # Czech Name
+        worksheet_species.column_dimensions['D'].width = 26  # Detections
+        
+        # Enable text wrapping and bottom border for entire Species Table
+        thin_border = Border(bottom=Side(style='thin'))
+        
+        for row in worksheet_species.iter_rows(min_row=1, max_row=worksheet_species.max_row):
+            for cell in row:
+                cell.alignment = Alignment(wrap_text=True, vertical='top')
+                cell.border = thin_border
+                
+        # Header and footer for Species Table
+        worksheet_species.oddHeader.left.text = f"{db_path}"
+        worksheet_species.oddFooter.right.text = "Page &P"
+    
+    excel_data = buffer.getvalue()
+    
+    st.download_button(
+        label="📥 Download Excel",
+        data=excel_data,
+        file_name=f"species_list_{db_path.stem}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True
+    )
 
 st.divider()
 
