@@ -19,7 +19,7 @@ from streamlit_searchbox import st_searchbox
 # CONSTANTS
 # =============================================================================
 
-MIN_COLORSCALE_MAX = 10  # Minimum value for colorscale maximum
+MIN_COLORSCALE_MAX = 4  # Minimum value for colorscale maximum
 HEATMAP_CELL_SIZE = 12    # Cell size in pixels (square)
 
 
@@ -54,8 +54,6 @@ def show_play_dialog(date, halfhour_idx, cell_value, cell_count, species_filter,
         time_end = dt_time(hour, 29, 59)
     else:
         time_end = dt_time(hour, 59, 59)
-    
-    date_to = date
     
     st.markdown(f"**📅 Date:** {date.day}.{date.month}.{date.year}")
     st.markdown(f"**🕐 Time:** {time_start.strftime('%H:%M')} - {time_end.strftime('%H:%M')}")
@@ -458,7 +456,7 @@ def init_filter_state():
 def init_heatmap_state():
     """Initialize heatmap-specific options."""
     if 'heatmap_colormap' not in st.session_state:
-        st.session_state['heatmap_colormap'] = "inferno"
+        st.session_state['heatmap_colormap'] = "turbo"
     if 'heatmap_weight_confidence' not in st.session_state:
         st.session_state['heatmap_weight_confidence'] = True
 
