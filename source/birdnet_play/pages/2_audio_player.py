@@ -130,12 +130,16 @@ with col1:
         with col_b:
             if st.button("✕", key="clear_species", help="Clear species filter"):
                 st.session_state['filter_species'] = ''
+                # Increment counter to force searchbox reset
+                st.session_state['searchbox_reset_counter'] = st.session_state.get('searchbox_reset_counter', 0) + 1
                 st.rerun()
     else:
-        # No species selected - show searchbox
+        # Use dynamic key to force component reset when cleared
+        searchbox_key = f"species_searchbox_{st.session_state.get('searchbox_reset_counter', 0)}"
+        
         selected_species = st_searchbox(
             search_species_callback,
-            key="species_searchbox",
+            key=searchbox_key,
             placeholder="Search species... (type to filter)",
             clear_on_submit=False
         )

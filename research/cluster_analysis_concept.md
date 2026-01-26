@@ -1,5 +1,9 @@
 # Konzept: Species Co-Occurrence Cluster Analysis
 
+## Ausgangsüberlegung
+
+Wenn Aufnahmen verschiedener Arten zeitlich immer wieder zusammen fallen, dann besteht die Möglichkeit, dass durch eng beieinander liegende Cluster zwar nicxht die angezeigte Art detektiert wurde, sondern die im Nachbarcluster. Wie kann man solche Cluster finde und wie kann man sie visualisieren?
+
 ## 1. Algorithmus-Design
 
 ### 1.1 Grundprinzip: Zeitlich gewichtete Proximity-Analyse
@@ -7,6 +11,7 @@
 **Ziel:** Identifikation von Species-Paaren, die statistisch signifikant häufiger gemeinsam auftreten als zufällig erwartet.
 
 **Methodik:**
+
 - Paarweiser Vergleich aller Detections innerhalb eines Zeitfensters
 - Gauß-gewichtete Ko-Okkurrenz basierend auf zeitlichem Abstand
 - Aggregation in symmetrischer Species-Pair-Matrix
@@ -14,36 +19,37 @@
 ### 1.2 Gauß-Kernel für zeitliche Wichtung
 
 **Formel:**
+
 ```python
 weight = exp(-distance² / (2 * σ²))
 ```
 
 **Parameter:**
+
 - **σ (Sigma):** 5 Minuten (Default, konfigurierbar)
 - **max_distance:** 5 × σ = 25 Minuten (Bereichsprüfgrenze)
 - **distance:** Zeitdifferenz zwischen zwei Detections in Minuten
 
 **Eigenschaften:**
+
 - Bei distance = 0: weight = 1.0 (maximale Relevanz)
 - Bei distance = σ (5 Min): weight ≈ 0.607
 - Bei distance = 2σ (10 Min): weight ≈ 0.135
 - Bei distance = 3σ (15 Min): weight ≈ 0.011
 - Bei distance > 5σ (25 Min): weight = 0 (nicht mehr berechnet)
 
-**Biologische Interpretation:**
-- Vögel, die zur gleichen Zeit singen → maximale Korrelation
-- Vögel im 5-Min-Fenster → starke Korrelation (60%)
-- Vögel im 10-Min-Fenster → mittlere Korrelation (13%)
-- Vögel > 25 Min auseinander → keine Korrelation
+An dieser Stelle muss geprüft werden, wie Birdnet mit einem Audioschnipsel um geht: Werden da auch mehre Arten mit confidence angegeben? Wenn ja, sollte die Zeitlich vollständige Überlappung (distance = 0) nochmal höher gewichtet werden, als in der Tabelle bzw. der genannten Formel.
 
 ### 1.3 Proximity-Matrix-Berechnung
 
 **Input:**
+
 - Alle Detections aus Snapshot (z.B. 1 Tag)
 - Sortiert nach `segment_start_local`
 - Gefiltert nach `min_confidence` (aus Analyse-Config)
 
 **Algorithmus (Sliding Window):**
+
 ```
 1. Sortiere alle Detections nach Zeit: D = [d1, d2, ..., dn]
 2. Initialisiere leere Pair-Matrix: M[species_a, species_b] = 0
@@ -57,13 +63,16 @@ weight = exp(-distance² / (2 * σ²))
 ```
 
 **Komplexität:**
+
 - Naive: O(n²) - nicht praktikabel bei ~50k Detections/Tag
 - Optimiert mit Sliding Window: O(n × w)
   - w = durchschnittliche Detections im 25-Min-Fenster
   - Bei 10 Detections/Min → w ≈ 250
   - → O(50k × 250) = 12.5M Operationen (machbar)
+- Mit Hilfe der max_distance (Abbruch nach a * σ) wird die Komplexität begrenzt.
 
 **Optimierung:**
+
 - Binäre Suche für Fenster-Grenzen (bisect)
 - Nur obere Dreiecksmatrix berechnen (Symmetrie)
 - Optional: Sparse Matrix für seltene Species
@@ -72,63 +81,56 @@ weight = exp(-distance² / (2 * σ²))
 
 ## 2. GPU-Beschleunigung
 
+Zu prüfen ist noch, ob die Berechnung für eine komplette Datenbank ad-hoc auf der CPU möglich ist oder ob ein eigener pre-Analyse-Walk benötigt wird. Dann wäre die GPU möglichweise sinnvoll zur Beschleunigung.
+
 ### 2.1 GPU-taugliche Operationen
 
 **Kandidaten für GPU:**
 
 1. **Distanz-Matrix-Berechnung:**
+
    - Input: Zeitstempel-Array (n × 1)
    - Output: Distanz-Matrix (n × n)
    - Operation: Pairwise Differenzen → GPU-parallelisierbar
-
 2. **Gauß-Kernel-Anwendung:**
+
    - Input: Distanz-Matrix
    - Output: Weight-Matrix
    - Operation: Element-wise exp() → GPU-optimal
-
 3. **Species-Aggregation:**
+
    - Input: Weight-Matrix, Species-Labels
    - Output: Pair-Matrix
    - Operation: GroupBy + Sum → teilweise GPU-tauglich (CuPy/Numba)
 
 **Technologie-Stack:**
+
 - **CuPy:** NumPy-kompatibel, GPU-beschleunigt
 - **Numba CUDA:** Custom Kernels für spezielle Operationen
 - **PyTorch/TensorFlow:** Falls komplexere Matrix-Ops nötig
 
-### 2.2 CPU-Fallback
+### 2.2 CPU-Lösung
 
 **Parallelisierung:**
+
 - Multiprocessing über Tages-Chunks
 - Jeder Worker berechnet Teil der Pair-Matrix
 - Merge-Step aggregiert Ergebnisse
 
 **Libraries:**
+
 - `multiprocessing.Pool`
 - Pandas/NumPy für Matrix-Operationen
 - `scipy.sparse` für große sparse Matrices
-
-### 2.3 Entscheidungskriterien GPU vs. CPU
-
-**GPU nutzen wenn:**
-- Snapshot > 10k Detections
-- Viele Species (>100) → große Matrix
-- Wiederholte Läufe mit verschiedenen σ-Werten
-
-**CPU nutzen wenn:**
-- Snapshot < 5k Detections
-- Einzelne Ad-hoc-Analysen
-- Keine CUDA-Hardware verfügbar
-
-**Implementierung:** Auto-Detection mit Fallback
 
 ---
 
 ## 3. Statistische Metriken
 
-### 3.1 Lift-Analyse (Hauptmetrik)
+### 3.1 Lift-Analyse
 
 **Formel:**
+
 ```python
 Expected(A, B) = count(A) × count(B) / total_windows
 Observed(A, B) = weighted_cooccurrence(A, B)
@@ -136,27 +138,32 @@ Lift(A, B) = Observed / Expected
 ```
 
 **Interpretation:**
+
 - **Lift = 1.0:** Unabhängig (wie erwartet)
 - **Lift > 1.0:** Positive Korrelation (treten häufiger zusammen auf)
 - **Lift < 1.0:** Negative Korrelation (meiden sich)
 
 **Verdachts-Schwellen (Hypothese, zu verifizieren):**
+
 - **Lift > 3.0:** Sehr verdächtig (potenzielle Fehlzuordnung)
 - **Lift 2.0-3.0:** Verdächtig (genauer prüfen)
 - **Lift 1.5-2.0:** Leichte Korrelation (biologisch plausibel?)
 - **Lift < 0.5:** Negative Korrelation (exklusives Verhalten?)
 
 **Problem:** Definition von "total_windows" bei kontinuierlicher Zeit
+
 - **Lösung:** Normierung über gewichtete Gesamt-Vorkommen
 
 ### 3.2 Support (Absolute Häufigkeit)
 
 **Formel:**
+
 ```python
 Support(A, B) = weighted_cooccurrence(A, B)
 ```
 
 **Interpretation:**
+
 - Absolute "Stärke" der Korrelation
 - Filtert seltene Zufallskorrelationen
 - Kombiniert mit Lift: Nur Paare mit Support > Threshold
@@ -164,17 +171,20 @@ Support(A, B) = weighted_cooccurrence(A, B)
 ### 3.3 Confidence (Conditional Probability)
 
 **Formel:**
+
 ```python
 Confidence(A → B) = weighted_cooccurrence(A, B) / total_weighted_occurrences(A)
 Confidence(B → A) = weighted_cooccurrence(A, B) / total_weighted_occurrences(B)
 ```
 
 **Interpretation:**
+
 - "Wie oft tritt B auf, wenn A vorhanden ist?"
 - Asymmetrisch: Conf(A→B) ≠ Conf(B→A)
 - Nützlich für Fehlzuordnungs-Hypothesen
 
 **Beispiel:**
+
 ```
 Kohlmeise: 1000 gewichtete Vorkommen
 Exot. Vogel: 50 gewichtete Vorkommen
@@ -189,11 +199,13 @@ Conf(Exot → Kohlmeise): 45/50 = 90%
 ### 3.4 Jaccard-Koeffizient (Optional)
 
 **Formel:**
+
 ```python
 Jaccard(A, B) = |Zeitpunkte mit A ∩ B| / |Zeitpunkte mit A ∪ B|
 ```
 
 **Interpretation:**
+
 - Ähnlichkeit der zeitlichen Verteilung
 - Wert: 0 (disjunkt) bis 1 (identisch)
 - Weniger gewichtet als Lift, aber komplementär
@@ -207,6 +219,7 @@ Jaccard(A, B) = |Zeitpunkte mit A ∩ B| / |Zeitpunkte mit A ∪ B|
 **Pfad:** `cluster_analysis.db` (neben Source-DB oder konfigurierbar)
 
 **Vorteile:**
+
 - Unabhängig von Analyse-DB (keine Schema-Änderungen)
 - Mehrere Analyse-Runs vergleichbar
 - Export/Archivierung einfach
@@ -216,33 +229,22 @@ Jaccard(A, B) = |Zeitpunkte mit A ∩ B| / |Zeitpunkte mit A ∪ B|
 **Zweck:** Tracking aller durchgeführten Analysen mit Parametern
 
 ```sql
-CREATE TABLE analysis_runs (
-    run_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    created_at TEXT NOT NULL,           -- ISO-Timestamp
-    
+CREATE TABLE cooccurences_run (
+
     -- Source
     source_db_path TEXT NOT NULL,       -- Pfad zur birdnet_analysis.db
-    
+  
     -- Snapshot-Definition
     snapshot_date_from TEXT,            -- NULL = gesamte DB
     snapshot_date_to TEXT,
-    
+  
     -- Algorithmus-Parameter
     min_confidence REAL NOT NULL,       -- Aus Analyse-Config oder Override
-    sigma_minutes REAL NOT NULL,        -- Default: 5.0
-    max_distance_minutes REAL NOT NULL, -- Default: 5 × sigma = 25.0
+    sigma_seconds REAL NOT NULL,        -- Default: 5.0 x 60
+    max_distance_seconds REAL NOT NULL, -- Default: 5 × sigma_seconds = 25.0
     weight_function TEXT NOT NULL,      -- 'gaussian' (später: 'exponential', 'linear')
-    
-    -- Verarbeitungs-Info
-    total_detections INTEGER,           -- Anzahl Detections im Snapshot
-    total_species INTEGER,              -- Anzahl unique Species
-    total_pairs_computed INTEGER,       -- Anzahl berechneter Paare
-    processing_time_seconds REAL,
-    
-    -- Hardware
-    used_gpu BOOLEAN,                   -- TRUE wenn GPU genutzt
-    device_info TEXT,                   -- z.B. "RTX A6000" oder "CPU 8-cores"
-    
+    min_lift_level REAL NOT NULL,       -- Default: 1.5 (a mean lift value to add a coocrurences result in DB)
+  
     -- Optional
     comment TEXT
 );
@@ -252,31 +254,33 @@ CREATE TABLE analysis_runs (
 
 **Zweck:** Speicherung aller Species-Paare mit Metriken
 
+TODO: Das ist noch zu klären!!!
+
 ```sql
 CREATE TABLE species_pairs (
     pair_id INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id INTEGER NOT NULL,
-    
+  
     -- Species
     species_a TEXT NOT NULL,            -- Scientific name (alphabetisch sortiert)
     species_b TEXT NOT NULL,            -- species_a < species_b (Symmetrie)
-    
+  
     -- Ko-Okkurrenz
     weighted_cooccurrence REAL NOT NULL,    -- Gauß-gewichtete Summe
-    
+  
     -- Statistische Maße
     lift REAL,
     support REAL,                       -- = weighted_cooccurrence (redundant, aber explizit)
     confidence_a_to_b REAL,             -- P(B|A)
     confidence_b_to_a REAL,             -- P(A|B)
     jaccard REAL,                       -- Optional
-    
+  
     -- Basis-Statistik
     count_a INTEGER NOT NULL,           -- Gesamt-Detections von A im Snapshot
     count_b INTEGER NOT NULL,           -- Gesamt-Detections von B im Snapshot
     weighted_count_a REAL,              -- Gewichtete Summe (für Confidence-Berechnung)
     weighted_count_b REAL,
-    
+  
     FOREIGN KEY (run_id) REFERENCES analysis_runs(run_id),
     UNIQUE(run_id, species_a, species_b)
 );
@@ -291,21 +295,23 @@ CREATE INDEX idx_pairs_species_b ON species_pairs(run_id, species_b);
 
 ### 4.4 Tabelle: `clusters` (Placeholder für Phase 3)
 
+TODO: Das ist noch zu klären.
+
 **Zweck:** Spätere Clustering-Ergebnisse (Community Detection, Hierarchical)
 
 ```sql
 CREATE TABLE clusters (
     cluster_id INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id INTEGER NOT NULL,
-    
+  
     algorithm TEXT NOT NULL,            -- 'louvain', 'hierarchical', etc.
     cluster_number INTEGER NOT NULL,    -- Cluster-Index (0, 1, 2, ...)
     species TEXT NOT NULL,              -- Member
-    
+  
     -- Optional: Cluster-Metriken
     cluster_size INTEGER,               -- Anzahl Species im Cluster
     intra_cluster_density REAL,         -- Durchschnittlicher Lift innerhalb
-    
+  
     FOREIGN KEY (run_id) REFERENCES analysis_runs(run_id),
     UNIQUE(run_id, algorithm, cluster_number, species)
 );
@@ -318,6 +324,8 @@ CREATE TABLE clusters (
 ## 5. Implementierungs-Architektur
 
 ### 5.1 Modul-Struktur
+
+BEACHTE: Das ist eine Idee, die im Umfang übers Ziel hinaus schießen kann:
 
 ```
 source/
@@ -335,6 +343,7 @@ source/
 ### 5.2 Haupt-Module
 
 #### **cluster_analysis.py**
+
 ```python
 def run_analysis(
     source_db_path: Path,
@@ -348,13 +357,14 @@ def run_analysis(
 ) -> int:
     """
     Führt komplette Cluster-Analyse durch.
-    
+  
     Returns:
         run_id der erstellten Analyse
     """
 ```
 
 #### **proximity_calculator.py**
+
 ```python
 def calculate_proximity_matrix(
     detections: pd.DataFrame,
@@ -364,13 +374,13 @@ def calculate_proximity_matrix(
 ) -> Tuple[np.ndarray, List[str]]:
     """
     Berechnet Gauß-gewichtete Proximity-Matrix.
-    
+  
     Args:
         detections: DataFrame mit ['segment_start_local', 'scientific_name']
         sigma_minutes: Gauß-Kernel Parameter
         max_distance_minutes: Bereichsprüfgrenze
         use_gpu: Versuche GPU-Beschleunigung
-        
+  
     Returns:
         (proximity_matrix, species_list)
         proximity_matrix: Symmetrische Matrix (N×N) mit N = unique species
@@ -379,6 +389,7 @@ def calculate_proximity_matrix(
 ```
 
 #### **statistics.py**
+
 ```python
 def calculate_statistics(
     proximity_matrix: np.ndarray,
@@ -387,7 +398,7 @@ def calculate_statistics(
 ) -> pd.DataFrame:
     """
     Berechnet statistische Metriken für alle Paare.
-    
+  
     Returns:
         DataFrame mit Spalten:
         ['species_a', 'species_b', 'weighted_cooccurrence', 
@@ -397,6 +408,7 @@ def calculate_statistics(
 ```
 
 #### **cluster_db.py**
+
 ```python
 def init_cluster_database(db_path: Path) -> None:
     """Erstellt Schema falls nicht vorhanden."""
@@ -432,6 +444,7 @@ poetry run birdnet-analysis \
 ```
 
 **Argumente:**
+
 - `source_db`: Pfad zur birdnet_analysis.db (Positional)
 - `--output`: Pfad zur cluster_analysis.db (Default: neben source_db)
 - `--date-from`, `--date-to`: Snapshot-Zeitraum (Optional, Default: gesamte DB)
@@ -443,6 +456,7 @@ poetry run birdnet-analysis \
 ### 5.4 Progress-Tracking
 
 **Analog zu birdnet_walker:**
+
 - Konsolen-Output mit Fortschrittsbalken
 - Phasen:
   1. "Loading detections from DB..."
@@ -455,9 +469,12 @@ poetry run birdnet-analysis \
 
 ## 6. Workflow & Phasen
 
+BEACHTE: Das ist nur eine Idee. Kann sein, man kann die Lösung deutlich sparsamer kodieren.
+
 ### Phase 1: Proximity-Matrix-Berechnung
 
 **Input:**
+
 ```python
 detections = [
     {'segment_start_local': datetime(...), 'scientific_name': 'Parus major'},
@@ -467,6 +484,7 @@ detections = [
 ```
 
 **Prozess:**
+
 1. Sortiere nach Zeit
 2. Erstelle Species-Index (alphabetisch sortiert)
 3. Initialisiere Matrix M (N×N, sparse)
@@ -477,6 +495,7 @@ detections = [
 5. Output: Symmetrische Matrix M
 
 **GPU-Variante:**
+
 1. Konvertiere Timestamps zu NumPy-Array
 2. Berechne Distanz-Matrix (CuPy: pairwise_distances)
 3. Wende Gauß-Kernel an (element-wise)
@@ -484,6 +503,7 @@ detections = [
 5. Aggregiere nach Species (GroupBy-GPU-Kernel)
 
 **CPU-Variante:**
+
 - Wie oben, aber mit NumPy/Pandas
 - Optional: Multiprocessing über Tages-Chunks
 
@@ -492,19 +512,20 @@ detections = [
 **Input:** Proximity-Matrix M, Species-Liste, Detection-Counts
 
 **Berechnung:**
+
 ```python
 for i in range(N):
     for j in range(i+1, N):  # Nur obere Dreiecksmatrix
         species_a = species_list[i]
         species_b = species_list[j]
-        
+  
         observed = M[i, j]
         expected = count[i] * count[j] / total_effective_windows
         lift = observed / expected
-        
+  
         conf_a_to_b = observed / weighted_count[i]
         conf_b_to_a = observed / weighted_count[j]
-        
+  
         # Store to results
 ```
 
@@ -513,132 +534,24 @@ for i in range(N):
 ### Phase 3: Clustering (Später)
 
 **Placeholder für:**
+
 - Graph-Konstruktion (Knoten = Species, Kanten = Lift > Threshold)
 - Community Detection (Louvain, Label Propagation)
 - Hierarchical Clustering (scipy.cluster.hierarchy)
 
 **Status:** Noch nicht spezifiziert
 
----
-
-## 7. Snapshot-Strategie
-
-### 7.1 Start: 1-Tages-Snapshots
-
-**Rationale:**
-- Überschaubare Datenmenge (~50k Detections)
-- Schnelle Iteration
-- Tages-Varianz erkennbar
-
-**Workflow:**
-```bash
-# Analyse für 2025-05-01
-poetry run birdnet-analysis db.db \
-  --date-from 2025-05-01 --date-to 2025-05-01
-
-# Analyse für 2025-05-02
-poetry run birdnet-analysis db.db \
-  --date-from 2025-05-02 --date-to 2025-05-02
-```
-
-### 7.2 Erweiterung: Wöchentliche/Monatliche Snapshots
-
-**Später implementierbar:**
-- Automatische Chunk-Generierung
-- Parallele Verarbeitung mehrerer Snapshots
-- Aggregation über Zeiträume
-
-**Vorteil:**
-- Saisonale Muster erkennbar
-- Langzeit-Korrelationen
-
-### 7.3 Vollständige DB-Analyse
-
-**Use Case:** Gesamt-Übersicht
-
-**Vorsicht:**
-- Sehr große Matrizen (bei vielen Species)
-- Längere Rechenzeit
-- Möglicherweise Speicher-Limitationen
-
-**Empfehlung:** Erst nach Tests mit 1-Tages-Snapshots
-
----
-
-## 8. Technologie-Entscheidungen
-
-### 8.1 Dependencies
-
-**Neu hinzufügen zu pyproject.toml:**
-```toml
-[tool.poetry.dependencies]
-cupy-cuda12x = { version = "^13.0.0", optional = true }  # GPU-Support
-numba = "^0.59.0"                                         # JIT-Compilation
-scipy = "^1.12.0"                                         # Clustering (später)
-networkx = { version = "^3.2", optional = true }          # Graph-Analyse (später)
-
-[tool.poetry.extras]
-gpu = ["cupy-cuda12x"]
-clustering = ["networkx"]
-```
-
-**Installation:**
-```bash
-poetry install --extras "gpu clustering"
-```
-
-### 8.2 GPU-Handling
-
-**Auto-Detection:**
-```python
-try:
-    import cupy as cp
-    GPU_AVAILABLE = True
-except ImportError:
-    GPU_AVAILABLE = False
-
-def use_gpu_if_available(force: bool = False) -> bool:
-    if force and not GPU_AVAILABLE:
-        raise RuntimeError("GPU requested but CuPy not available")
-    return GPU_AVAILABLE and (force or auto_detect_best_device())
-```
-
----
-
-## 9. Testing-Strategie
-
-### 9.1 Unit-Tests
-
-**Zu testen:**
-- `gauss_kernel()` - Mathematische Korrektheit
-- `calculate_proximity_matrix()` - Kleine Testdaten
-- `calculate_lift()` - Bekannte Beispiele
-
-### 9.2 Integration-Tests
-
-**Szenarien:**
-- Kleine Test-DB (1 Tag, ~1000 Detections)
-- Vergleich GPU vs. CPU (Ergebnisse müssen identisch sein)
-- Performance-Benchmarks
-
-### 9.3 Validierung
-
-**Manuelle Checks:**
-- Bekannte Korrelationen (z.B. Kohlmeise ↔ Blaumeise)
-- Plausibilität von Lift-Werten
-- Visualisierung von Top-10-Paaren
-
----
-
 ## 10. Offene Punkte & Nächste Schritte
 
 ### Offen:
+
 1. **Lift-Threshold:** Empirisch ermitteln (nach ersten Runs)
 2. **GPU-Implementierung:** CuPy vs. Numba vs. PyTorch?
 3. **Sparse Matrix:** Sinnvoll bei vielen Species (>500)?
 4. **Clustering-Algorithmus:** Welcher für Phase 3?
 
 ### Nächste Schritte:
+
 1. **Implementierung Phase 1 (Proximity Calculator)**
    - CPU-Variante zuerst
    - GPU-Variante danach
@@ -646,7 +559,6 @@ def use_gpu_if_available(force: bool = False) -> bool:
 3. **DB-Schema erstellen & Writer**
 4. **CLI-Interface**
 5. **Testing mit echten Daten**
-
 
 # 11. Literaturrecherche und verwandte Ansätze
 
@@ -658,6 +570,8 @@ Die automatisierte Analyse von akustischen Monitoring-Daten steht vor ähnlichen
 
 Besonders relevant für unser Projekt ist die Erkenntnis, dass False-Positive-Raten von 50% oder mehr bei automatischen Detektionssystemen durchaus akzeptabel sein können, solange diese Fehlerraten korrekt in nachfolgenden Analysen berücksichtigt werden. Marques et al. (2009) demonstrierten, dass Dichte-Schätzungen selbst bei 50% False Positives zuverlässig bleiben, wenn die Fehlerrate quantifiziert und kompensiert wird. Dies unterstützt unseren Ansatz, BirdNET mit niedriger Confidence-Schwelle laufen zu lassen (0.1 in unserem Fall) und die Filterung nachträglich durchzuführen.
 
+Ein Beispiel ist unser Nachweis des Auerhuhns, bei dem sich Confidence nicht unbedingt als ein guter Schwellparameter dargestellt hat.
+
 ### 11.1.2 Validation Prediction - Ein statistischer Ansatz
 
 Eine besonders interessante Methode wurde von Balantic & Donovan (2020, https://pubmed.ncbi.nlm.nih.gov/32335994/) entwickelt. Ihr "Validation Prediction"-Ansatz nutzt die prädiktive Beziehung zwischen dem Recognizer-Score (in unserem Fall: BirdNET Confidence) und der Signal-Energie eines akustischen Signals. Die Grundidee ist, dass echte Vogelrufe typischerweise eine charakteristische Beziehung zwischen Lautstärke und Erkennungswahrscheinlichkeit aufweisen, während False Positives oft von dieser Beziehung abweichen.
@@ -665,12 +579,11 @@ Eine besonders interessante Methode wurde von Balantic & Donovan (2020, https://
 Die Methode funktioniert wie folgt:
 
 1. **Feature-Extraktion**: Für jede Detection werden zusätzliche Features extrahiert:
+
    - Signal-Energie (amplitude)
    - Dominante Frequenz
    - Ökologische Prädiktoren (Tageszeit, Jahreszeit)
-
 2. **Statistische Modellierung**: Ein Modell (z.B. logistische Regression) lernt die Beziehung zwischen diesen Features und der Wahrscheinlichkeit, dass eine Detection ein True Positive ist.
-
 3. **Priorisierung**: Basierend auf diesem Modell werden Detections priorisiert für manuelle Validation. Detections mit hoher Wahrscheinlichkeit für True Positive werden bevorzugt.
 
 In ihrer Studie mit Common Nighthawk und Ovenbird konnten Balantic & Donovan die Anzahl der manuell zu validierenden Detections um 75.7% bzw. 42.9% reduzieren, während 98% der echten Detections erhalten blieben.
@@ -700,7 +613,6 @@ In der ökologischen Forschung ist die Analyse von Artkoexistenz ein zentrales T
 **Wichtige Erkenntnis**: Nicht-zufällige Ko-Okkurrenz-Muster können auch **ohne direkte Interaktionen zwischen Arten** entstehen. Zwei Mechanismen sind dabei zentral:
 
 1. **Environmental Filtering**: Arten mit ähnlichen Habitatpräferenzen treten gemeinsam auf, weil sie ähnliche Umweltbedingungen bevorzugen - nicht weil sie interagieren.
-
 2. **Limiting Similarity**: Arten mit sehr ähnlichen ökologischen Anforderungen tendieren dazu, sich räumlich oder zeitlich zu segregieren, um Konkurrenz zu vermeiden.
 
 Für unser Projekt bedeutet dies: **Eine hohe Ko-Okkurrenz zweier Vogelarten könnte biologisch legitim sein** (gleicher Lebensraum, gleiche Aktivitätszeiten). Die Unterscheidung zwischen echter ökologischer Ko-Okkurrenz und systematischer Modell-Verwechslung ist daher nicht trivial.
@@ -712,13 +624,15 @@ Eine Schlüsselstudie zur zeitlichen Nischen-Partitionierung wurde von Papastama
 **Methodik**: Die Autoren nutzten Kernel Density Estimation (KDE) auf Aktivitätsdaten, um zeitliche Überlappungen zu quantifizieren. Arten mit hoher zeitlicher Überlappung wurden als potenzielle Konkurrenten identifiziert, während Arten mit komplementären Aktivitätsmustern (z.B. tagaktiv vs. nachtaktiv) als koexistierend durch Nischen-Partitionierung klassifiziert wurden.
 
 **Übertragung auf Vogelstimmen**: Wenn zwei Vogelarten tatsächlich koexistieren, erwarten wir:
+
 - **Ähnliche Tageszeiten-Präferenzen** (beide singen morgens)
 - **Unabhängige Detections** (Art A singt, Art B singt, manchmal zeitgleich)
 - **Ähnliche saisonale Muster**
 
 Bei systematischer Verwechslung erwarten wir dagegen:
+
 - **Asymmetrische Abhängigkeit** (Art B tritt fast nur auf, wenn Art A erkannt wurde)
-- **Verdächtige zeitliche Muster** (Art B erscheint immer genau 3 Sekunden nach Art A - typisch für überlappende 3s-Segmente)
+- **Verdächtige zeitliche Muster** (Art B erscheint im gleichen 3 Sekunden Abschnitt oder immer genau im Abschnitt davor oder nach Art A - typisch für überlappende 3s-Segmente)
 
 ### 11.2.3 Network-basierte Ansätze für Ko-Okkurrenz
 
@@ -728,10 +642,12 @@ Eine moderne Studie von Gauzens et al. (2019, https://www.nature.com/articles/s4
 2. **Functional Network**: Knoten = Arten, Kanten = funktionale Ähnlichkeit (trait similarity)
 
 Durch Vergleich der Modularität beider Netzwerke können sie unterscheiden zwischen:
+
 - **Environmental Filtering**: Hohe Kongruenz zwischen beiden Netzwerken (ähnliche Traits → gemeinsames Auftreten)
 - **Limiting Similarity**: Niedrige Kongruenz (ähnliche Traits → räumliche/zeitliche Segregation)
 
 **Anwendung für uns**: Wir könnten ein analoges Konzept entwickeln:
+
 - **Co-occurrence Network**: Basierend auf unserem Lift/Support
 - **Acoustic Similarity Network**: Basierend auf spektralen Features der Rufe (falls verfügbar)
 
@@ -748,37 +664,41 @@ Association Rule Mining (ARM) ist eine etablierte Technik aus dem Data Mining, u
 **Formale Definitionen**:
 
 Eine Association Rule hat die Form `X → Y`, wobei X (Antecedent) und Y (Consequent) Item-Sets sind. Für Vogelstimmen wäre:
+
 - X = {Species A wurde detektiert}
 - Y = {Species B wurde detektiert}
 
 Drei Metriken bewerten solche Regeln:
 
-1. **Support**: 
+1. **Support**:
+
    ```
    Support(X → Y) = P(X ∪ Y) = |Transactions mit X und Y| / |Alle Transactions|
    ```
-   
-   Support misst die absolute Häufigkeit des gemeinsamen Auftretens. Hoher Support bedeutet: Die Regel ist statistisch relevant (keine zufällige Einzelbeobachtung).
 
+   Support misst die absolute Häufigkeit des gemeinsamen Auftretens. Hoher Support bedeutet: Die Regel ist statistisch relevant (keine zufällige Einzelbeobachtung).
 2. **Confidence**:
+
    ```
    Confidence(X → Y) = P(Y|X) = Support(X ∪ Y) / Support(X)
    ```
-   
-   Confidence misst die bedingte Wahrscheinlichkeit. Hohe Confidence bedeutet: Wenn X auftritt, ist Y sehr wahrscheinlich.
 
+   Confidence misst die bedingte Wahrscheinlichkeit. Hohe Confidence bedeutet: Wenn X auftritt, ist Y sehr wahrscheinlich.
 3. **Lift**:
+
    ```
    Lift(X → Y) = Confidence(X → Y) / Support(Y) 
                 = P(X ∪ Y) / (P(X) × P(Y))
    ```
-   
-   Lift normalisiert Confidence gegen die erwartete Wahrscheinlichkeit unter Unabhängigkeit. 
+
+   Lift normalisiert Confidence gegen die erwartete Wahrscheinlichkeit unter Unabhängigkeit.
+
    - Lift = 1: X und Y sind unabhängig
    - Lift > 1: Positive Korrelation (X und Y treten häufiger zusammen auf als erwartet)
    - Lift < 1: Negative Korrelation (X und Y meiden sich)
 
 **Beispiel aus unserem Kontext**:
+
 ```
 Kohlmeise: 1000 Detections (10% aller Zeitfenster)
 Exotischer Vogel: 50 Detections (0.5% aller Zeitfenster)
@@ -803,6 +723,7 @@ Pattern: (Event_i, Event_j)Δt
 wobei Δt der zeitliche Abstand zwischen den Events ist.
 
 **Significance Measures**:
+
 - **Temporal Support**: Wie oft tritt das Muster (Ei, Ej) mit Offset Δt auf?
 - **Temporal Confidence**: Gegeben Ei, wie wahrscheinlich folgt Ej nach Δt?
 
@@ -815,12 +736,14 @@ wobei Δt der zeitliche Abstand zwischen den Events ist.
 Eine wichtige methodische Warnung kommt aus der ARM-Community: Nicht alle Metriken sind "null-invariant". Tan et al. (2004) zeigen, dass viele populäre Metriken durch "null transactions" (Transaktionen, die weder X noch Y enthalten) beeinflusst werden.
 
 **Null-invariante Metriken**:
+
 - Kulczynski
 - Cosine
 - All-Confidence
 - Max-Confidence
 
 **NICHT null-invariant**:
+
 - Support
 - Confidence
 - Lift (teilweise problematisch bei sehr seltenen Items)
@@ -828,6 +751,8 @@ Eine wichtige methodische Warnung kommt aus der ARM-Community: Nicht alle Metrik
 Für unseren Anwendungsfall ist dies relevant, weil die meisten Zeitfenster **keine** Vogelstimmen enthalten (stille Perioden, nur Hintergrundrauschen). Diese "null transactions" sollten idealerweise keinen Einfluss auf unsere Metriken haben.
 
 **Praktische Lösung**: Wir verwenden Lift als Hauptmetrik, aber ergänzen mit:
+
+- Selektion der Erkennungsabschnitte: Aus der Basis-Analyse, die alle Erkennungen oberhalb eines bestimmten Confidence-Level enthält, übernehmen wir nur die Abschnitte, an denen tatsächlich Erkennungen stattgefunden haben. Ausgelassene Zeitfenster sind entsprechend der Gleichungen zu berücksichtigen: Entweder verwenden um die Normalisierung zu gewährleisten oder nicht verwenden, um Fehlzusammenhänge zu vermeiden.
 - **Jaccard-Koeffizient**: `|A ∩ B| / |A ∪ B|` (inhärent null-invariant)
 - **Conditional Probabilities**: `P(B|A)` und `P(A|B)` zur Asymmetrie-Detektion
 
@@ -853,12 +778,14 @@ Ein innovativer Ansatz wurde von Tenyks (2023, https://medium.com/@tenyks_blogge
 **Übertragung auf Vogelstimmen**:
 
 In unserem Fall könnten wir eine **Temporal Confusion Matrix** konstruieren:
+
 - **Zeilen**: Tatsächlich vorhandene Arten (Ground Truth)
 - **Spalten**: Detektierte Arten (BirdNET Output)
 - **Zusätzliche Spalte**: "Ghost" für Detections ohne tatsächlichen Vogel
 - **Zusätzliche Zeile**: "Missed" für nicht-detektierte tatsächliche Rufe
 
 Diese Matrix würde zeigen:
+
 - Welche Arten systematisch mit welchen verwechselt werden
 - Welche Arten häufig "Ghost Predictions" verursachen
 - Welche Arten häufig übersehen werden
@@ -867,7 +794,7 @@ Diese Matrix würde zeigen:
 
 ### 11.4.3 Systematische Fehleranalyse
 
-Mehrere Studien betonen die Wichtigkeit, systematische Fehler zu identifizieren statt nur aggregierte Metriken (Accuracy, F1-Score) zu berechten. 
+Mehrere Studien betonen die Wichtigkeit, systematische Fehler zu identifizieren statt nur aggregierte Metriken (Accuracy, F1-Score) zu berechten.
 
 Eine Studie zu neuropsychiatrischer Diagnostik (https://www.researchgate.net/figure/Confusion-matrix-summarizing-the-errors-made-by-the-classifier-on-the-test-set_fig1_230830197) zeigt, dass **Class Imbalance** besonders problematisch ist:
 
@@ -888,14 +815,15 @@ Temporal Point Processes (TPPs) sind ein mathematisches Framework zur Modellieru
 **Kernkonzepte**:
 
 1. **Conditional Intensity Function λ*(t)**:
+
    ```
    λ*(t|Ht) = lim(dt→0) P(Event in [t, t+dt) | History bis t) / dt
    ```
-   
-   Die Intensity-Funktion beschreibt die momentane Rate, mit der Events auftreten, gegeben die bisherige Historie.
 
-2. **History Dependence**: 
+   Die Intensity-Funktion beschreibt die momentane Rate, mit der Events auftreten, gegeben die bisherige Historie.
+2. **History Dependence**:
    Events beeinflussen die Wahrscheinlichkeit zukünftiger Events. Dies ermöglicht Modellierung von:
+
    - **Self-Excitation**: Ein Event erhöht die Wahrscheinlichkeit weiterer Events
    - **Mutual Excitation**: Event-Typ A triggert Event-Typ B
 
@@ -909,6 +837,7 @@ Der klassische Hawkes Process (Hawkes, 1971) ist ein self-exciting TPP mit der I
 ```
 
 wobei:
+
 - μ = Baseline-Rate (spontane Events)
 - α = Excitation-Stärke (wie stark triggert ein Event weitere?)
 - β = Decay-Rate (wie schnell klingt der Effekt ab?)
@@ -927,10 +856,12 @@ wobei:
 Moderne Ansätze (Du et al., 2016, https://www.kdd.org/kdd2016/papers/files/rpp1081-duA.pdf) nutzen Recurrent Neural Networks (RNNs) zur Parametrisierung der Intensity-Funktion:
 
 **RMTPP (Recurrent Marked TPP)**:
+
 1. Encode Event-Historie mit LSTM: `ht = LSTM(ht-1, [tj, yj])`
 2. Leite Intensity ab: `λ*(t) = f(ht, t)`
 
 **Vorteile**:
+
 - Keine parametrische Form vorgegeben
 - Kann komplexe, nichtlineare Abhängigkeiten lernen
 - Skaliert auf große Event-Sequenzen
@@ -942,6 +873,7 @@ Eine aktuelle Studie (TransFeat-TPP, 2024, https://arxiv.org/html/2407.16161v1) 
 **Feature Importance**: Das Modell kann die Wichtigkeit einzelner Covariates quantifizieren - welche Faktoren beeinflussen Event-Raten am stärksten?
 
 **Übertragung auf Vogelstimmen**:
+
 - **Covariates**: Tageszeit, Temperatur, Wetter, Jahreszeit
 - **Event-Typen**: Species-Detections
 - **Ziel**: Modelliere λSpecies_A(t | Covariates, Historie)
@@ -951,16 +883,19 @@ Wenn Species B systematisch als Co-Variate für Species A auftaucht (hohe αAB i
 ### 11.5.5 Kritische Bewertung für unser Projekt
 
 **Vorteile von TPPs**:
+
 - Mathematisch rigoros
 - Explizite Modellierung zeitlicher Dynamik
 - Kann kausale Beziehungen ("A triggert B") von Korrelationen unterscheiden
 
 **Nachteile**:
+
 - Hohe Komplexität (schwierig zu implementieren und zu interpretieren)
 - Benötigt viele Daten für robuste Schätzung
 - Computationally expensive (besonders Neural TPPs)
 
 **Einschätzung**: Für unseren Anwendungsfall (Fehlererkennung in BirdNET) ist der **Association-Rule-Ansatz praktikabler**:
+
 - Einfacher zu implementieren
 - Leichter zu interpretieren (Lift, Support, Confidence sind intuitiv)
 - Skaliert besser auf große Datenmengen (Matrix-Operationen, GPU-beschleunigbar)
@@ -975,14 +910,16 @@ TPPs könnten in einer **späteren Phase** interessant werden, wenn wir **kausal
 
 Eine interessante Arbeit von Subramanian et al. (2016, https://arxiv.org/pdf/1603.09012) definiert ein formales Framework für Event Co-occurrence in Streams:
 
-**Auto Co-occurrence**: 
+**Auto Co-occurrence**:
 Für Events Ei, Ej aus demselben Stream:
+
 ```
 AutoCoOcc(Ei, Ej, Δt) = Freq(Ei, Ej mit Offset Δt) / Freq(Ei)
 ```
 
 **Cross Co-occurrence**:
 Für Events aus verschiedenen Streams:
+
 ```
 CrossCoOcc(Ei, Ej, Δt) = Freq(Ei, Ej mit Offset Δt) / Freq(Ei)
 ```
@@ -995,13 +932,16 @@ Die Autoren entwickeln einen FSA-basierten Algorithmus, der effizient Patterns m
 ### 11.6.2 Co-occurrence Matrices mit temporalen Offsets
 
 Die Autoren visualisieren Co-occurrence durch Heatmaps mit verschiedenen Δt-Werten:
+
 - Δt = 0: Exakt gleichzeitige Events
 - Δt = 1s, 5s, 10s, ...: Verschiedene zeitliche Abstände
 
 **Anregung für Visualisierung**: Wir könnten eine ähnliche Darstellung entwickeln:
+
 ```
 Species A × Species B × Temporal Offset
 ```
+
 Dies würde zeigen, ob Verwechslungen primär bei Δt ≈ 0 auftreten (überlappende Segmente) oder auch bei größeren Offsets.
 
 ---
@@ -1013,21 +953,25 @@ Dies würde zeigen, ob Verwechslungen primär bei Δt ≈ 0 auftreten (überlapp
 Aus der Literaturrecherche ergibt sich ein optimaler Hybrid-Ansatz für unser Projekt:
 
 **Foundation: Association Rule Mining**
+
 - **Basis-Algorithmus**: Gauß-gewichtete Proximity-Matrix (wie in Konzept Kapitel 2)
 - **Metriken**: Lift, Support, Confidence (A→B und B→A)
 - **Grund**: Etabliert, interpretierbar, skalierbar
 
 **Enrichment 1: Ökologisches Wissen**
+
 - **Temporal Niche Analysis**: Tageszeit-Überlappung zwischen Arten
 - **Seasonal Patterns**: Monatliche Präsenz-Muster
 - **Grund**: Unterscheidung ökologische Ko-Okkurrenz vs. Verwechslung
 
 **Enrichment 2: Asymmetrie-Detektion**
+
 - **Conditional Probability Ratio**: `max(P(B|A), P(A|B)) / min(P(B|A), P(A|B))`
 - **Verdachts-Score**: `Lift × Asymmetry_Ratio`
 - **Grund**: Verwechslungen zeigen oft starke Asymmetrie
 
 **Enrichment 3: Multi-Scale Temporal Analysis**
+
 - **Verschiedene σ-Werte**: σ ∈ {2, 5, 10, 20} Minuten
 - **Scale-Dependent Patterns**: Kurzzeit- vs. Langzeit-Korrelationen
 - **Grund**: Verwechslungen dominieren bei kurzen Zeitskalen
@@ -1035,29 +979,32 @@ Aus der Literaturrecherche ergibt sich ein optimaler Hybrid-Ansatz für unser Pr
 ### 11.7.2 Konkrete Implementierungs-Roadmap
 
 **Phase 1: Basis-Implementierung** (wie in Konzept Kapitel 4-6)
+
 - Proximity-Calculator mit Gauß-Kernel (σ=5 Min)
 - Lift/Support/Confidence Berechnung
 - SQLite Output-Schema
 
 **Phase 2: Erweiterte Metriken**
+
 ```python
 # In statistics.py
 def calculate_extended_metrics(proximity_matrix, species_list, detection_counts):
     metrics = calculate_basic_metrics()  # Lift, Support, Confidence
-    
+  
     # Asymmetrie
     metrics['asymmetry_ratio'] = metrics['conf_a_to_b'] / metrics['conf_b_to_a']
-    
+  
     # Verdachts-Score
     metrics['suspicion_score'] = metrics['lift'] * metrics['asymmetry_ratio']
-    
+  
     # Jaccard (null-invariant)
     metrics['jaccard'] = ...
-    
+  
     return metrics
 ```
 
 **Phase 3: Multi-Scale Analysis**
+
 ```python
 # In cluster_analysis.py
 def run_multiscale_analysis(detections, sigma_values=[2, 5, 10, 20]):
@@ -1066,14 +1013,15 @@ def run_multiscale_analysis(detections, sigma_values=[2, 5, 10, 20]):
         proximity = calculate_proximity_matrix(detections, sigma)
         stats = calculate_statistics(proximity)
         results[f'sigma_{sigma}'] = stats
-    
+  
     # Cross-Scale Consistency Check
     consistency = analyze_scale_consistency(results)
-    
+  
     return results, consistency
 ```
 
 **Phase 4: Ökologischer Context**
+
 ```python
 # Neue Tabelle in cluster_analysis.db
 CREATE TABLE ecological_context (
@@ -1093,11 +1041,13 @@ CREATE TABLE ecological_context (
 Inspiriert von der bioacoustic Literatur, sollten wir einen iterativen Validierungs-Workflow etablieren:
 
 **Stufe 1: Automatische Priorisierung**
+
 ```
 Top-N Verdächtige Paare (höchster Suspicion Score)
 ```
 
 **Stufe 2: Manuelle Stichproben-Validation**
+
 ```
 Für Top-20 Paare:
   - Höre 5-10 zufällige Detections beider Arten
@@ -1106,6 +1056,7 @@ Für Top-20 Paare:
 ```
 
 **Stufe 3: Pattern-Extraktion**
+
 ```
 Aus validierten Paaren:
   - Welche Merkmale haben echte Verwechslungen?
@@ -1114,6 +1065,7 @@ Aus validierten Paaren:
 ```
 
 **Stufe 4: Ground-Truth-Erweiterung**
+
 ```
 Validierte Paare als Ground Truth für:
   - Confusion Matrix Erstellung
@@ -1125,18 +1077,19 @@ Validierte Paare als Ground Truth für:
 Die Literaturrecherche hat auch Fragen aufgeworfen, die wir im Projekt adressieren könnten:
 
 1. **Optimal σ-Wahl**: Gibt es eine "optimale" Zeitskala für Verwechslungs-Detektion?
+
    - Hypothese: Verwechslungen dominieren bei σ < 5 Min (überlappende Segmente)
    - Test: Multi-Scale-Analyse mit systematischer Evaluation
-
 2. **Lift vs. Conditional Probability**: Welche Metrik ist robuster für seltene Arten?
+
    - Hypothese: Lift ist anfällig bei sehr seltenen Arten (kleine Nenner)
    - Alternative: Bayesian posterior mit Prior auf typische Ko-Okkurrenz-Raten
-
 3. **Transfer Learning**: Können wir Verwechslungs-Pattern von einem Standort auf andere übertragen?
+
    - Hypothese: Akustische Verwechslungen (ähnliche Rufe) sind standort-unabhängig
    - Test: Cross-Validation über verschiedene Datenbanken
-
 4. **Temporal Dynamics**: Ändern sich Verwechslungs-Pattern über die Saison?
+
    - Hypothese: Verwechslungen mit Zugvögeln treten nur während Migrationsperioden auf
    - Test: Monatliche Analyse-Runs, Vergleich der Lift-Werte
 
@@ -1147,27 +1100,30 @@ Die Literaturrecherche hat auch Fragen aufgeworfen, die wir im Projekt adressier
 Die Literaturrecherche hat gezeigt, dass unser geplanter Ansatz gut fundiert ist in mehreren etablierten Forschungsbereichen:
 
 **Validierung unseres Ansatzes**:
+
 - ✅ Lift/Support/Confidence sind etablierte Metriken (Association Rule Mining)
 - ✅ Zeitliche Gewichtung ist biologisch plausibel (Temporal Niche Theory)
 - ✅ Ko-Okkurrenz-Analyse wird in der Ökologie intensiv genutzt
 - ✅ Ähnliche Probleme in Bioacoustic Community (False Positive Detection)
 
 **Neue Erkenntnisse**:
+
 - 🆕 Asymmetrie-Detektion via P(B|A) / P(A|B) als starker Indikator
 - 🆕 Multi-Scale-Analyse könnte Verwechslungen von ökologischer Ko-Okkurrenz trennen
 - 🆕 Null-Invarianz wichtig - Jaccard als robuste Ergänzung zu Lift
 - 🆕 Network-Visualisierung könnte Verwechslungs-Cluster sichtbar machen
 
 **Nächste Schritte**:
+
 1. **Implementierung Basis-Algorithmus** (Kapitel 4-6 des Konzepts)
 2. **Test mit 1-Tages-Snapshot** (realistische Datenmenge)
 3. **Manuelle Validation** (Top-20 verdächtige Paare)
 4. **Iteration** basierend auf Feedback
 
 **Langfristige Vision**:
+
 - Aufbau einer **Verwechslungs-Datenbank** als Community-Ressource
 - Integration in BirdNET-Workflow als **Post-Processing-Step**
 - Entwicklung von **Model-Agnostic Correction-Faktoren** für häufige Verwechslungen
 
 Die Literatur zeigt: Wir bewegen uns auf solidem wissenschaftlichen Fundament, kombinieren aber Ansätze aus verschiedenen Disziplinen auf innovative Weise. Dies könnte sowohl für die Bioakustik-Community als auch für die ökologische Forschung wertvolle Erkenntnisse liefern.
-
