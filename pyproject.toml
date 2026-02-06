@@ -7,7 +7,8 @@ readme = "README.md"
 packages = [
     { include = "birdnet_walker", from = "source"},
     { include = "shared", from = "source" },
-    { include = "birdnet_play", from = "source" }
+    { include = "birdnet_play", from = "source" },
+    { include = "time_correlation", from = "source"}
     ]
 
 [tool.poetry.dependencies]
@@ -39,6 +40,7 @@ openpyxl = "^3.1.5"
 [tool.poetry.scripts]
 birdnet-walker = "birdnet_walker.main:main"
 birdnet-play = "birdnet_play.cli:main"
+time-correlation = "time_correlation.__main__:main"
 
 [build-system]
 requires = ["poetry-core"]
