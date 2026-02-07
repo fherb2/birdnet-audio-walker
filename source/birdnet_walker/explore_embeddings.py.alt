@@ -1,0 +1,397 @@
+#!/usr/bin/env python3
+"""
+BirdNET Embedding Exploration Script
+
+Purpose:
+- Test the encode() method availability and functionality
+- Inspect API signature and parameters
+- Extract test embeddings and validate format
+- Measure performance
+- Compare with predict() workflow
+
+Usage:
+    python explore_embeddings.py /path/to/test/audio.wav
+"""
+
+import sys
+import time
+import inspect
+from pathlib import Path
+import numpy as np
+
+# Suppress TensorFlow warnings
+import warnings
+warnings.filterwarnings('ignore', category=FutureWarning)
+
+try:
+    import birdnet
+    print("✓ BirdNET import successful")
+except ImportError as e:
+    print(f"✗ Failed to import birdnet: {e}")
+    sys.exit(1)
+
+
+def print_section(title: str):
+    """Print formatted section header"""
+    print("\n" + "=" * 80)
+    print(f"  {title}")
+    print("=" * 80)
+
+
+def inspect_model_api(model):
+    """Inspect model object for available methods"""
+    print_section("1. MODEL API INSPECTION")
+    
+    print("\n🔍 Available methods on model object:")
+    methods = [m for m in dir(model) if not m.startswith('_')]
+    for method in sorted(methods):
+        attr = getattr(model, method)
+        if callable(attr):
+            print(f"  ✓ {method}()")
+    
+    # Check for encode method specifically
+    print("\n🎯 Checking for encode() method:")
+    if hasattr(model, 'encode'):
+        print("  ✓ encode() method EXISTS")
+        
+        # Get signature
+        try:
+            sig = inspect.signature(model.encode)
+            print(f"\n  📋 Method signature:")
+            print(f"     encode{sig}")
+            
+            # Get docstring
+            doc = inspect.getdoc(model.encode)
+            if doc:
+                print(f"\n  📖 Docstring:")
+                for line in doc.split('\n'):
+                    print(f"     {line}")
+        except Exception as e:
+            print(f"  ⚠ Could not inspect encode() signature: {e}")
+    else:
+        print("  ✗ encode() method NOT FOUND")
+        print("  ℹ Available methods:")
+        for method in methods[:10]:
+            print(f"     - {method}")
+        return False
+    
+    return True
+
+
+def test_encode_basic(model, audio_path: str):
+    """Test basic encode() functionality"""
+    print_section("2. BASIC ENCODE() TEST")
+    
+    print(f"\n🎵 Test audio file: {audio_path}")
+    audio_path = Path(audio_path)
+    
+    if not audio_path.exists():
+        print(f"  ✗ File not found: {audio_path}")
+        return None
+    
+    print(f"  ✓ File exists ({audio_path.stat().st_size / 1024 / 1024:.2f} MB)")
+    
+    # Try to encode
+    print("\n🔄 Calling model.encode()...")
+    try:
+        start_time = time.time()
+        
+        # Try most likely signature based on predict()
+        result = model.encode(str(audio_path))
+        
+        elapsed = time.time() - start_time
+        print(f"  ✓ encode() completed in {elapsed:.2f} seconds")
+        
+        return result, elapsed
+        
+    except TypeError as e:
+        # If signature is wrong, try with different parameters
+        print(f"  ⚠ TypeError (trying different parameters): {e}")
+        
+        # Try with additional parameters (like predict has)
+        try:
+            print("\n🔄 Trying with additional parameters...")
+            result = model.encode(
+                str(audio_path),
+                batch_size=32,
+                overlap_duration_s=0.0
+            )
+            elapsed = time.time() - start_time
+            print(f"  ✓ encode() completed with params in {elapsed:.2f} seconds")
+            return result, elapsed
+        except Exception as e2:
+            print(f"  ✗ Still failed: {e2}")
+            return None
+            
+    except Exception as e:
+        print(f"  ✗ encode() failed: {type(e).__name__}: {e}")
+        return None
+
+
+def analyze_embedding_result(result):
+    """Analyze the structure and content of embedding result"""
+    print_section("3. EMBEDDING RESULT ANALYSIS")
+    
+    if result is None:
+        print("  ✗ No result to analyze")
+        return None
+    
+    result_data, elapsed = result
+    
+    print(f"\n📊 Result type: {type(result_data)}")
+    
+    # Check if it's a DataFrame (like predict() returns)
+    if hasattr(result_data, 'to_dataframe'):
+        print("  ℹ Result has .to_dataframe() method")
+        try:
+            df = result_data.to_dataframe()
+            print(f"\n  DataFrame shape: {df.shape}")
+            print(f"  DataFrame columns: {list(df.columns)}")
+            print(f"\n  First few rows:")
+            print(df.head())
+            
+            # Check if embeddings are in a column
+            if 'embedding' in df.columns:
+                print("\n  ✓ Found 'embedding' column")
+                first_emb = df['embedding'].iloc[0]
+                print(f"     Type: {type(first_emb)}")
+                if isinstance(first_emb, np.ndarray):
+                    print(f"     Shape: {first_emb.shape}")
+                    print(f"     Dtype: {first_emb.dtype}")
+                return df
+            else:
+                print(f"  ℹ No 'embedding' column found")
+                print(f"     Available columns: {df.columns.tolist()}")
+                
+        except Exception as e:
+            print(f"  ⚠ Could not convert to DataFrame: {e}")
+    
+    # Check if it's a numpy array
+    elif isinstance(result_data, np.ndarray):
+        print("  ✓ Result is numpy array")
+        print(f"\n  📐 Shape: {result_data.shape}")
+        print(f"  📋 Dtype: {result_data.dtype}")
+        print(f"  📊 Memory size: {result_data.nbytes / 1024 / 1024:.2f} MB")
+        
+        # Validate embedding dimensions
+        if len(result_data.shape) == 2:
+            n_segments, emb_dim = result_data.shape
+            print(f"\n  ✓ 2D array detected:")
+            print(f"     - {n_segments} segments/chunks")
+            print(f"     - {emb_dim} embedding dimensions")
+            
+            # Check if it's the expected 1024 dimensions
+            if emb_dim == 1024:
+                print(f"     ✓ Embedding dimension matches BirdNET v2.4 (1024)")
+            else:
+                print(f"     ⚠ Unexpected embedding dimension (expected 1024, got {emb_dim})")
+        
+        # Value range analysis
+        print(f"\n  📈 Value statistics:")
+        print(f"     - Min: {result_data.min():.6f}")
+        print(f"     - Max: {result_data.max():.6f}")
+        print(f"     - Mean: {result_data.mean():.6f}")
+        print(f"     - Std: {result_data.std():.6f}")
+        
+        # Check for NaN or Inf
+        if np.isnan(result_data).any():
+            print(f"     ⚠ Contains NaN values")
+        if np.isinf(result_data).any():
+            print(f"     ⚠ Contains Inf values")
+        
+        return result_data
+    
+    # Check if it's a list
+    elif isinstance(result_data, list):
+        print("  ℹ Result is a list")
+        print(f"     Length: {len(result_data)}")
+        if len(result_data) > 0:
+            print(f"     First item type: {type(result_data[0])}")
+            if isinstance(result_data[0], np.ndarray):
+                print(f"     First item shape: {result_data[0].shape}")
+        return result_data
+    
+    # Unknown format
+    else:
+        print(f"  ⚠ Unexpected result type: {type(result_data)}")
+        print(f"     Attributes: {dir(result_data)[:20]}")
+        return result_data
+
+
+def save_test_embedding(embeddings, output_path: str = "test_embeddings.npy"):
+    """Save embeddings for later inspection"""
+    print_section("4. SAVING TEST EMBEDDINGS")
+    
+    if embeddings is None:
+        print("  ✗ No embeddings to save")
+        return
+    
+    try:
+        # Convert to numpy array if needed
+        if not isinstance(embeddings, np.ndarray):
+            if hasattr(embeddings, 'to_numpy'):
+                embeddings = embeddings.to_numpy()
+            else:
+                print(f"  ⚠ Cannot convert {type(embeddings)} to numpy array")
+                return
+        
+        np.save(output_path, embeddings)
+        print(f"  ✓ Saved embeddings to: {output_path}")
+        print(f"     Shape: {embeddings.shape}")
+        print(f"     Size: {Path(output_path).stat().st_size / 1024:.2f} KB")
+        
+    except Exception as e:
+        print(f"  ✗ Failed to save: {e}")
+
+
+def compare_with_predict(model, audio_path: str):
+    """Compare encode() workflow with predict() workflow"""
+    print_section("5. COMPARISON WITH PREDICT()")
+    
+    print("\n🔄 Running predict() for comparison...")
+    try:
+        start_time = time.time()
+        predictions = model.predict(
+            str(audio_path),
+            device='GPU',
+            overlap_duration_s=0.0,
+            batch_size=32,
+            default_confidence_threshold=0.1
+        )
+        pred_elapsed = time.time() - start_time
+        print(f"  ✓ predict() completed in {pred_elapsed:.2f} seconds")
+        
+        # Convert to dataframe
+        df = predictions.to_dataframe()
+        print(f"\n  📊 Predictions DataFrame:")
+        print(f"     Shape: {df.shape}")
+        print(f"     Columns: {list(df.columns)}")
+        print(f"     Detections: {len(df)} segments")
+        
+        return pred_elapsed
+        
+    except Exception as e:
+        print(f"  ✗ predict() failed: {e}")
+        return None
+
+
+def print_summary(has_encode: bool, encode_result, pred_time):
+    """Print summary and recommendations"""
+    print_section("📋 SUMMARY & RECOMMENDATIONS")
+    
+    if not has_encode:
+        print("\n❌ ENCODE METHOD NOT AVAILABLE")
+        print("\nAlternative approaches:")
+        print("  1. Use BirdNET-Analyzer's embeddings module directly")
+        print("  2. Access internal model layers via TensorFlow")
+        print("  3. Contact BirdNET team for embedding extraction")
+        return
+    
+    if encode_result is None:
+        print("\n⚠ ENCODE METHOD EXISTS BUT FAILED")
+        print("\nNext steps:")
+        print("  1. Check error messages above")
+        print("  2. Try different parameter combinations")
+        print("  3. Check birdnet library version (pip show birdnet)")
+        return
+    
+    embeddings, enc_time = encode_result
+    
+    print("\n✅ EMBEDDING EXTRACTION SUCCESSFUL")
+    
+    # Determine format
+    if isinstance(embeddings, np.ndarray):
+        print(f"\n📐 Embedding Format:")
+        print(f"   - Type: numpy.ndarray")
+        print(f"   - Shape: {embeddings.shape}")
+        print(f"   - Dtype: {embeddings.dtype}")
+        
+        # Recommendations for storage
+        if embeddings.dtype == np.float32:
+            print(f"\n💾 Storage Recommendations:")
+            print(f"   Current: float32 (~4 KB per 1024-dim vector)")
+            float16_size = embeddings.nbytes / 2
+            print(f"   float16: ~2 KB per vector (recommended for clustering)")
+            print(f"   Savings: {embeddings.nbytes / 1024:.2f} KB → {float16_size / 1024:.2f} KB")
+    
+    # Performance comparison
+    if pred_time:
+        print(f"\n⚡ Performance Comparison:")
+        print(f"   encode():  {enc_time:.2f} seconds")
+        print(f"   predict(): {pred_time:.2f} seconds")
+        overhead = enc_time - pred_time
+        print(f"   Overhead:  {overhead:.2f} seconds ({overhead/pred_time*100:+.1f}%)")
+        
+        if overhead < pred_time * 0.2:
+            print("   ✓ Low overhead - embeddings are nearly free!")
+        else:
+            print("   ⚠ Significant overhead - consider optimization")
+    
+    # Integration recommendations
+    print(f"\n🔧 Integration Recommendations:")
+    print(f"   1. Add --extract-embeddings flag to CLI")
+    print(f"   2. Store as BLOB in SQLite (float16 recommended)")
+    print(f"   3. Extract during prediction (same forward pass)")
+    print(f"   4. Expected DB size increase: ~2 KB per detection")
+    
+    # Schema suggestion
+    print(f"\n💿 Database Schema Suggestion:")
+    print(f"   ALTER TABLE detections ADD COLUMN embedding BLOB;")
+    print(f"   -- Store as: embedding.astype(np.float16).tobytes()")
+    print(f"   -- Load as:  np.frombuffer(blob, dtype=np.float16)")
+
+
+def main():
+    """Main exploration workflow"""
+    print("=" * 80)
+    print("  🔬 BirdNET EMBEDDING EXPLORATION")
+    print("=" * 80)
+    
+    # Check command line argument
+    if len(sys.argv) < 2:
+        print("\n❌ Usage: python explore_embeddings.py /path/to/test/audio.wav")
+        print("\nℹ The script needs a WAV file to test embedding extraction.")
+        sys.exit(1)
+    
+    audio_path = sys.argv[1]
+    
+    # Load model
+    print_section("0. MODEL LOADING")
+    print("\n🔄 Loading BirdNET model (acoustic, v2.4, protobuf)...")
+    try:
+        start_time = time.time()
+        model = birdnet.load("acoustic", "2.4", "pb")
+        load_time = time.time() - start_time
+        print(f"  ✓ Model loaded in {load_time:.2f} seconds")
+    except Exception as e:
+        print(f"  ✗ Failed to load model: {e}")
+        sys.exit(1)
+    
+    # Run exploration steps
+    has_encode = inspect_model_api(model)
+    
+    if not has_encode:
+        print_summary(False, None, None)
+        return
+    
+    encode_result = test_encode_basic(model, audio_path)
+    
+    if encode_result:
+        embeddings_data = analyze_embedding_result(encode_result)
+        save_test_embedding(embeddings_data)
+    
+    pred_time = compare_with_predict(model, audio_path)
+    
+    print_summary(has_encode, encode_result, pred_time)
+    
+    print("\n" + "=" * 80)
+    print("  ✅ EXPLORATION COMPLETE")
+    print("=" * 80)
+    print("\nℹ Next steps:")
+    print("  1. Review output above")
+    print("  2. Check test_embeddings.npy file")
+    print("  3. Share results for implementation planning")
+
+
+if __name__ == "__main__":
+    main()

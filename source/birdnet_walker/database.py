@@ -6,6 +6,7 @@ import sqlite3
 from datetime import datetime, timedelta
 from loguru import logger
 import pandas as pd
+import numpy as np 
 
 from .species_translation import translate_species_name
 
@@ -59,6 +60,7 @@ def init_database(db_path: str):
             local_name TEXT,
             name_cs TEXT,
             confidence REAL NOT NULL,
+            embedding BLOB,
             FOREIGN KEY (filename) REFERENCES metadata(filename)
         )
     """)
@@ -154,7 +156,9 @@ def batch_insert_detections(
         filename: Original WAV filename
         metadata: File metadata dict
         detections: List of detection dicts from BirdNET
+                   MAY contain 'embedding' key with numpy array
         translation_table: Species translation table
+        birdnet_labels: BirdNET labels dict
     """
     if not detections:
         return
@@ -183,13 +187,21 @@ def batch_insert_detections(
             detection_start_local = metadata['timestamp_local'] + timedelta(seconds=detection_start_seconds)
             detection_end_local = metadata['timestamp_local'] + timedelta(seconds=detection_end_seconds)
             
-            # Insert detection
+            # NEW: Handle embedding if present
+            embedding_blob = None
+            if 'embedding' in detection and detection['embedding'] is not None:
+                # Convert numpy array to bytes (keep as float32)
+                embedding_array = detection['embedding'].astype(np.float32)
+                embedding_blob = embedding_array.tobytes()
+                logger.debug(f"Serialized embedding: {len(embedding_blob)} bytes")
+            
+            # Insert detection WITH embedding column
             cursor.execute("""
                 INSERT INTO detections 
                 (filename, segment_start_utc, segment_start_local, 
                  segment_end_utc, segment_end_local, timezone,
-                 scientific_name, local_name, name_cs, confidence)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 scientific_name, local_name, name_cs, confidence, embedding)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 filename,
                 detection_start_utc.isoformat(),
@@ -200,7 +212,8 @@ def batch_insert_detections(
                 names['scientific'],
                 names['local'],
                 names['cs'],
-                detection['confidence']
+                detection['confidence'],
+                embedding_blob  # NEW: Embedding as BLOB or None
             ))
         
         # Commit transaction
@@ -222,7 +235,6 @@ def batch_insert_detections(
         conn.rollback()
     finally:
         conn.close()
-
 
 def db_writer_process(
     result_queue,
