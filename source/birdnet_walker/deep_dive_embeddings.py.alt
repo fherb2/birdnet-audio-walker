@@ -1,0 +1,480 @@
+#!/usr/bin/env python3
+"""
+BirdNET Embedding Deep Dive Script
+
+Purpose:
+- Investigate AcousticFileEncodingResult structure
+- Find how to extract embeddings from result object
+- Test if predict() can also return embeddings
+- Explore efficient combined workflows
+
+Usage:
+    python deep_dive_embeddings.py /path/to/test/audio.wav
+"""
+
+import sys
+import time
+import inspect
+from pathlib import Path
+import numpy as np
+
+# Suppress TensorFlow warnings
+import warnings
+warnings.filterwarnings('ignore', category=FutureWarning)
+
+try:
+    import birdnet
+    print("✓ BirdNET import successful")
+except ImportError as e:
+    print(f"✗ Failed to import birdnet: {e}")
+    sys.exit(1)
+
+
+def print_section(title: str):
+    """Print formatted section header"""
+    print("\n" + "=" * 80)
+    print(f"  {title}")
+    print("=" * 80)
+
+
+def deep_inspect_result_object(result_obj):
+    """Deep inspection of AcousticFileEncodingResult object"""
+    print_section("1. DEEP INSPECTION OF RESULT OBJECT")
+    
+    print(f"\n📦 Object type: {type(result_obj)}")
+    print(f"📦 Module: {type(result_obj).__module__}")
+    
+    # Get all attributes (including private)
+    print("\n📋 All attributes (including private):")
+    all_attrs = dir(result_obj)
+    
+    public_attrs = [a for a in all_attrs if not a.startswith('_')]
+    private_attrs = [a for a in all_attrs if a.startswith('_') and not a.startswith('__')]
+    
+    print(f"\n  🔓 Public attributes ({len(public_attrs)}):")
+    for attr in sorted(public_attrs):
+        try:
+            value = getattr(result_obj, attr)
+            if callable(value):
+                # It's a method
+                sig = inspect.signature(value) if hasattr(inspect, 'signature') else '(...)'
+                print(f"     ✓ {attr}{sig}")
+            else:
+                # It's a property/attribute
+                print(f"     • {attr}: {type(value).__name__}")
+                
+                # If it looks like data, show shape/length
+                if hasattr(value, 'shape'):
+                    print(f"       └─ shape: {value.shape}")
+                elif hasattr(value, '__len__') and not isinstance(value, str):
+                    try:
+                        print(f"       └─ length: {len(value)}")
+                    except:
+                        pass
+        except Exception as e:
+            print(f"     ⚠ {attr}: Error accessing ({e})")
+    
+    print(f"\n  🔒 Private attributes ({len(private_attrs)}):")
+    for attr in sorted(private_attrs)[:20]:  # Show first 20
+        try:
+            value = getattr(result_obj, attr)
+            print(f"     • {attr}: {type(value).__name__}")
+            
+            # Check if it contains embeddings
+            if 'embed' in attr.lower():
+                print(f"       ⭐ POTENTIAL EMBEDDING ATTRIBUTE!")
+                if hasattr(value, 'shape'):
+                    print(f"       └─ shape: {value.shape}")
+        except Exception as e:
+            print(f"     ⚠ {attr}: Error ({str(e)[:50]})")
+    
+    return public_attrs
+
+
+def try_extract_embeddings(result_obj, public_attrs):
+    """Try various methods to extract embeddings"""
+    print_section("2. ATTEMPTING TO EXTRACT EMBEDDINGS")
+    
+    embeddings = None
+    method_used = None
+    
+    # Method 1: Direct attribute access
+    print("\n🔍 Method 1: Checking common attribute names...")
+    for attr_name in ['embeddings', 'embedding', 'data', 'features', 'vectors']:
+        if hasattr(result_obj, attr_name):
+            print(f"  ✓ Found attribute: {attr_name}")
+            try:
+                value = getattr(result_obj, attr_name)
+                print(f"     Type: {type(value)}")
+                if isinstance(value, np.ndarray):
+                    print(f"     Shape: {value.shape}")
+                    embeddings = value
+                    method_used = f"Direct attribute: {attr_name}"
+                    break
+            except Exception as e:
+                print(f"     ✗ Error: {e}")
+    
+    # Method 2: Try to_numpy() or similar conversion methods
+    if embeddings is None:
+        print("\n🔍 Method 2: Checking conversion methods...")
+        for method_name in ['to_numpy', 'to_array', 'as_numpy', 'get_data', 'get_embeddings']:
+            if hasattr(result_obj, method_name):
+                print(f"  ✓ Found method: {method_name}()")
+                try:
+                    method = getattr(result_obj, method_name)
+                    if callable(method):
+                        value = method()
+                        print(f"     Type: {type(value)}")
+                        if isinstance(value, np.ndarray):
+                            print(f"     Shape: {value.shape}")
+                            embeddings = value
+                            method_used = f"Method: {method_name}()"
+                            break
+                except Exception as e:
+                    print(f"     ✗ Error: {e}")
+    
+    # Method 3: Check if it's iterable
+    if embeddings is None:
+        print("\n🔍 Method 3: Checking if result is iterable...")
+        try:
+            # Try to iterate
+            first_item = None
+            for i, item in enumerate(result_obj):
+                first_item = item
+                if i == 0:
+                    break
+            
+            if first_item is not None:
+                print(f"  ✓ Result is iterable")
+                print(f"     First item type: {type(first_item)}")
+                
+                # Try to convert to list and then numpy
+                try:
+                    all_items = list(result_obj)
+                    print(f"     Total items: {len(all_items)}")
+                    
+                    if isinstance(first_item, np.ndarray):
+                        embeddings = np.array(all_items)
+                        print(f"     ✓ Converted to numpy array")
+                        print(f"     Shape: {embeddings.shape}")
+                        method_used = "Iterable to numpy array"
+                except Exception as e:
+                    print(f"     ✗ Conversion failed: {e}")
+        except TypeError:
+            print("  ✗ Result is not iterable")
+        except Exception as e:
+            print(f"  ✗ Error: {e}")
+    
+    # Method 4: Check __array__ interface
+    if embeddings is None:
+        print("\n🔍 Method 4: Checking __array__ interface...")
+        if hasattr(result_obj, '__array__'):
+            print("  ✓ Object has __array__ interface")
+            try:
+                embeddings = np.asarray(result_obj)
+                print(f"     Shape: {embeddings.shape}")
+                method_used = "__array__ interface"
+            except Exception as e:
+                print(f"     ✗ Error: {e}")
+    
+    # Method 5: Check for .values or .data (pandas-like)
+    if embeddings is None:
+        print("\n🔍 Method 5: Checking pandas-like attributes...")
+        for attr_name in ['values', 'data', '_data']:
+            if hasattr(result_obj, attr_name):
+                print(f"  ✓ Found attribute: {attr_name}")
+                try:
+                    value = getattr(result_obj, attr_name)
+                    if isinstance(value, np.ndarray):
+                        print(f"     Type: numpy.ndarray")
+                        print(f"     Shape: {value.shape}")
+                        embeddings = value
+                        method_used = f"Pandas-like attribute: {attr_name}"
+                        break
+                except Exception as e:
+                    print(f"     ✗ Error: {e}")
+    
+    # Summary
+    print("\n📊 Extraction Summary:")
+    if embeddings is not None:
+        print(f"  ✅ SUCCESS!")
+        print(f"     Method: {method_used}")
+        print(f"     Shape: {embeddings.shape}")
+        print(f"     Dtype: {embeddings.dtype}")
+        print(f"     Memory: {embeddings.nbytes / 1024 / 1024:.2f} MB")
+        
+        # Quick stats
+        print(f"\n  📈 Quick statistics:")
+        print(f"     Min: {embeddings.min():.6f}")
+        print(f"     Max: {embeddings.max():.6f}")
+        print(f"     Mean: {embeddings.mean():.6f}")
+        print(f"     Std: {embeddings.std():.6f}")
+        
+        return embeddings
+    else:
+        print(f"  ❌ FAILED to extract embeddings")
+        print(f"     Tried all known methods")
+        return None
+
+
+def investigate_predict_embeddings(model, audio_path: str):
+    """Check if predict() can also return embeddings"""
+    print_section("3. INVESTIGATING PREDICT() FOR EMBEDDINGS")
+    
+    print("\n🔍 Checking predict() signature for embedding-related parameters...")
+    try:
+        sig = inspect.signature(model.predict)
+        print(f"\n  📋 Full predict() signature:")
+        print(f"     predict{sig}")
+        
+        # Check for parameters that might enable embedding extraction
+        params = sig.parameters
+        embedding_related = []
+        for param_name, param in params.items():
+            if 'embed' in param_name.lower() or 'feature' in param_name.lower():
+                embedding_related.append(param_name)
+                print(f"\n  ⭐ Found parameter: {param_name}")
+                print(f"     Default: {param.default}")
+        
+        if not embedding_related:
+            print("\n  ℹ No embedding-related parameters found in predict()")
+            
+    except Exception as e:
+        print(f"  ⚠ Could not inspect predict(): {e}")
+    
+    # Try calling predict() with return_embeddings or similar
+    print("\n🔍 Testing predict() with potential embedding flags...")
+    test_flags = [
+        'return_embeddings',
+        'include_embeddings',
+        'with_embeddings',
+        'embeddings',
+        'extract_features'
+    ]
+    
+    for flag in test_flags:
+        try:
+            print(f"\n  Testing: predict(..., {flag}=True)")
+            kwargs = {
+                'device': 'GPU',
+                'batch_size': 32,
+                'default_confidence_threshold': 0.1,
+                flag: True
+            }
+            result = model.predict(str(audio_path), **kwargs)
+            
+            # Check result type
+            print(f"     Result type: {type(result)}")
+            
+            # Check if result has embeddings
+            if hasattr(result, 'embeddings'):
+                print(f"     ✅ FOUND! Result has .embeddings attribute!")
+                emb = result.embeddings
+                print(f"     Type: {type(emb)}")
+                if isinstance(emb, np.ndarray):
+                    print(f"     Shape: {emb.shape}")
+                return True
+                
+        except TypeError as e:
+            if "unexpected keyword argument" in str(e):
+                pass  # Expected
+            else:
+                print(f"     ⚠ TypeError: {e}")
+        except Exception as e:
+            print(f"     ⚠ Error: {e}")
+    
+    print("\n  ℹ No working embedding flag found for predict()")
+    return False
+
+
+def test_parallel_extraction(model, audio_path: str):
+    """Test if we can run predict() and encode() in parallel"""
+    print_section("4. TESTING PARALLEL EXTRACTION")
+    
+    print("\n⚙️ Concept: Run predict() and encode() on same file simultaneously")
+    print("  (This would only make sense if they don't share GPU resources)")
+    
+    # For now, just measure sequential time
+    print("\n📊 Sequential timing:")
+    
+    print("\n  1️⃣ predict() alone...")
+    start = time.time()
+    pred_result = model.predict(
+        str(audio_path),
+        device='GPU',
+        batch_size=32,
+        default_confidence_threshold=0.1
+    )
+    pred_time = time.time() - start
+    print(f"     Time: {pred_time:.2f}s")
+    
+    print("\n  2️⃣ encode() alone...")
+    start = time.time()
+    enc_result = model.encode(str(audio_path), device='GPU', batch_size=32)
+    enc_time = time.time() - start
+    print(f"     Time: {enc_time:.2f}s")
+    
+    total_sequential = pred_time + enc_time
+    print(f"\n  📊 Total sequential time: {total_sequential:.2f}s")
+    
+    print("\n  💡 Analysis:")
+    print(f"     If they shared computation: ~{max(pred_time, enc_time):.2f}s")
+    print(f"     Actual sequential: {total_sequential:.2f}s")
+    overhead = total_sequential - max(pred_time, enc_time)
+    print(f"     Overhead: {overhead:.2f}s ({overhead/max(pred_time, enc_time)*100:.1f}%)")
+    
+    return pred_result, enc_result
+
+
+def check_birdnet_version_and_docs():
+    """Check BirdNET version and look for documentation"""
+    print_section("5. BIRDNET VERSION & DOCUMENTATION")
+    
+    print("\n📦 BirdNET version info:")
+    try:
+        if hasattr(birdnet, '__version__'):
+            print(f"  Version: {birdnet.__version__}")
+        else:
+            print("  ⚠ No __version__ attribute")
+    except:
+        pass
+    
+    print("\n📚 Checking for encode() documentation:")
+    try:
+        doc = inspect.getdoc(birdnet.load("acoustic", "2.4", "pb").encode)
+        if doc:
+            print("\n" + "─" * 80)
+            print(doc)
+            print("─" * 80)
+        else:
+            print("  ℹ No docstring available")
+    except Exception as e:
+        print(f"  ⚠ Could not get docstring: {e}")
+
+
+def propose_integration_strategy(embeddings_extracted: bool, method: str):
+    """Propose best integration strategy based on findings"""
+    print_section("6. INTEGRATION STRATEGY RECOMMENDATION")
+    
+    if not embeddings_extracted:
+        print("\n❌ PROBLEM: Cannot extract embeddings from encode() result")
+        print("\n🔧 Possible solutions:")
+        print("  1. Contact BirdNET team for API clarification")
+        print("  2. Use BirdNET-Analyzer's embeddings module instead")
+        print("  3. Access TensorFlow model layers directly")
+        print("  4. Wait for updated birdnet library with better API")
+        return
+    
+    print(f"\n✅ Embeddings successfully extracted via: {method}")
+    
+    print("\n📋 Recommended Integration Approach:")
+    print("\n  Option A: SEPARATE encode() CALL (Current Discovery)")
+    print("     Pros:")
+    print("       ✓ Clean API, well-defined interface")
+    print("       ✓ Officially supported method")
+    print("     Cons:")
+    print("       ✗ ~2.5x total time (predict + encode)")
+    print("       ✗ Duplicated audio processing")
+    print("       ✗ Not suitable for real-time analysis")
+    
+    print("\n  Option B: BATCH POST-PROCESSING")
+    print("     Workflow:")
+    print("       1. Run predict() for all files (fast)")
+    print("       2. Identify interesting detections")
+    print("       3. Run encode() only on interesting files")
+    print("     Pros:")
+    print("       ✓ Selective embedding extraction")
+    print("       ✓ Saves compute on uninteresting data")
+    print("     Cons:")
+    print("       ✗ Two-pass process")
+    print("       ✗ Complex workflow")
+    
+    print("\n  Option C: PARALLEL PROCESSING (If GPU memory allows)")
+    print("     Workflow:")
+    print("       1. predict() on GPU 0")
+    print("       2. encode() on GPU 1 (or CPU)")
+    print("       3. Synchronize results")
+    print("     Pros:")
+    print("       ✓ Overlap compute time")
+    print("     Cons:")
+    print("       ✗ Requires multiple GPUs or CPU fallback")
+    print("       ✗ Complex synchronization")
+    
+    print("\n  🎯 RECOMMENDED FOR YOUR USE CASE:")
+    print("     Given your RTX A6000 with 48GB VRAM and batch analysis:")
+    print("     → Use Option A with --extract-embeddings FLAG")
+    print("     → Make it OPTIONAL (default: OFF)")
+    print("     → User decides per-analysis if embeddings needed")
+    print("     → Trade-off: 2.5x time for full embedding dataset")
+    
+    print("\n  💾 Storage Impact:")
+    print("     Example: 30,000 detections")
+    print("     - Without embeddings: ~6 MB")
+    print("     - With embeddings (float16): ~66 MB")
+    print("     - Database size increase: ~10x")
+
+
+def main():
+    """Main deep dive workflow"""
+    print("=" * 80)
+    print("  🔬 BIRDNET EMBEDDING DEEP DIVE")
+    print("=" * 80)
+    
+    # Check command line argument
+    if len(sys.argv) < 2:
+        print("\n❌ Usage: python deep_dive_embeddings.py /path/to/test/audio.wav")
+        sys.exit(1)
+    
+    audio_path = sys.argv[1]
+    
+    # Load model
+    print("\n🔄 Loading BirdNET model...")
+    model = birdnet.load("acoustic", "2.4", "pb")
+    print("  ✓ Model loaded")
+    
+    # Run encode() to get result object
+    print("\n🔄 Running encode() to get result object...")
+    result = model.encode(audio_path, device='GPU', batch_size=32)
+    print(f"  ✓ Got result: {type(result)}")
+    
+    # Deep inspection
+    public_attrs = deep_inspect_result_object(result)
+    
+    # Try to extract embeddings
+    embeddings = try_extract_embeddings(result, public_attrs)
+    
+    # Check if predict() can do embeddings
+    predict_has_embeddings = investigate_predict_embeddings(model, audio_path)
+    
+    # Test parallel extraction
+    pred_result, enc_result = test_parallel_extraction(model, audio_path)
+    
+    # Check version and docs
+    check_birdnet_version_and_docs()
+    
+    # Propose strategy
+    method_used = "See Section 2" if embeddings is not None else None
+    propose_integration_strategy(
+        embeddings_extracted=(embeddings is not None),
+        method=method_used
+    )
+    
+    # Save embeddings if extracted
+    if embeddings is not None:
+        output_file = "extracted_embeddings.npy"
+        np.save(output_file, embeddings)
+        print(f"\n💾 Embeddings saved to: {output_file}")
+        print(f"   Shape: {embeddings.shape}")
+        print(f"   Size: {Path(output_file).stat().st_size / 1024:.2f} KB")
+    
+    print("\n" + "=" * 80)
+    print("  ✅ DEEP DIVE COMPLETE")
+    print("=" * 80)
+    print("\nNext steps:")
+    print("  1. Review findings above")
+    print("  2. Decide on integration strategy")
+    print("  3. Implement chosen approach")
+
+
+if __name__ == "__main__":
+    main()

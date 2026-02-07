@@ -22,6 +22,14 @@ SLEEP_INTERVAL = 0.1          # Sleep time in seconds when queue is full
 # BirdNET
 DEFAULT_CONFIDENCE = 0.09     # Default minimum confidence threshold
 
+# ============================================================================
+# NEW: Embedding Extraction Settings
+# ============================================================================
+EXTRACT_EMBEDDINGS_DEFAULT = True    # Default for --extract-embeddings flag
+EMBEDDING_DIMENSIONS = 1024          # BirdNET v2.4 embedding size
+SEGMENT_DURATION_S = 3.0             # BirdNET segment duration for matching
+# ============================================================================
+
 # Species Translation
 SPECIES_CACHE_DIR = "/tmp"
 SPECIES_CACHE_MAX_AGE_DAYS = 7

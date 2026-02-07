@@ -20,6 +20,7 @@ import birdnet
 from pathlib import Path
 from loguru import logger
 
+
 import warnings
 warnings.filterwarnings('ignore', category=FutureWarning)
 
@@ -31,7 +32,12 @@ from .config import (
     BIRDNET_LABELS_PATH,
     BIRDNET_DOWNLOAD_MAX_RETRIES,
     BIRDNET_DOWNLOAD_BASE_WAIT,
-    BIRDNET_DOWNLOAD_PROMPT_TIMEOUT
+    BIRDNET_DOWNLOAD_PROMPT_TIMEOUT,
+    # NEW IMPORTS:
+    EXTRACT_EMBEDDINGS_DEFAULT,
+    SEGMENT_DURATION_S,
+    OVERLAP_DURATION_S,
+    BATCH_SIZE
 )
 from .audiomoth_import import extract_metadata
 from .species_translation import download_species_table
@@ -41,7 +47,13 @@ from .database import (
     cleanup_incomplete_files, get_completed_files, set_file_status,
     get_missing_files, check_indices_exist, drop_all_indices, repair_orphaned_metadata
 )
-from .birdnet_analyzer import load_model, analyze_file
+from .birdnet_analyzer import (
+    load_model, 
+    analyze_file,
+    extract_embeddings,
+    match_embeddings_to_detections
+)
+
 from .progress import ProgressDisplay
 
 
@@ -202,15 +214,16 @@ def setup_model_with_prompt(auto_download: bool, no_auto_download: bool) -> bool
         return False
 
 def signal_handler(signum, frame):
-    """Handle Ctrl+C and other termination signals."""
     global _shutdown_requested, _db_writer_process
     logger.warning(f"Received signal {signum}, initiating shutdown...")
     _shutdown_requested = True
     
-    # Terminate DB writer if still running
     if _db_writer_process and _db_writer_process.is_alive():
         logger.info("Force-killing DB-Writer")
         _db_writer_process.kill()
+    
+    # Force exit after 2 seconds
+    sys.exit(1)
 
 
 def find_wav_files(input_folder: Path) -> list[Path]:
@@ -278,7 +291,8 @@ def process_folder(
     no_index: bool,
     translation_table,
     birdnet_labels: dict,
-    lang_shortcut:str
+    lang_shortcut: str,
+    extract_embeddings_flag: bool = False
 ) -> tuple[int, int]:
     """
     Process all WAV files in a single folder.
@@ -288,7 +302,9 @@ def process_folder(
         confidence: Minimum confidence threshold
         no_index: If True, do not create time index
         translation_table: Species translation table
-        model: BirdNET model instance
+        birdnet_labels: BirdNET labels dict
+        lang_shortcut: Language code for species names
+        extract_embeddings_flag: If True, extract embeddings in addition to predictions
         
     Returns:
         Tuple of (files_processed, total_detections)
@@ -437,6 +453,37 @@ def process_folder(
                         timestamp=metadata['timestamp_utc'],
                         min_confidence=confidence
                     )
+                    
+                                # NEW: Extract embeddings if requested
+                if extract_embeddings_flag:
+                    try:
+                        logger.debug(f"Extracting embeddings for {filename}...")
+                        
+                        # Extract embeddings for entire file
+                        embeddings_array = extract_embeddings(
+                            file_path,
+                            overlap_duration_s=OVERLAP_DURATION_S,
+                            batch_size=BATCH_SIZE
+                        )
+                        
+                        # Match embeddings to detections based on timing
+                        detections = match_embeddings_to_detections(
+                            detections,
+                            embeddings_array,
+                            segment_duration_s=SEGMENT_DURATION_S
+                        )
+                        
+                        logger.debug(f"Successfully matched embeddings to {len(detections)} detections")
+                        
+                    except Exception as e:
+                        logger.error(f"Failed to extract embeddings for {filename}: {e}")
+                        logger.error(f"Skipping file {filename} due to embedding extraction failure")
+                        
+                        # Mark file as failed
+                        set_file_status(str(db_path), filename, 'failed', 
+                                      f'Embedding extraction failed: {str(e)}')
+                        completed += 1
+                        continue  # Skip this file entirely
                 
                 # Log all captured output for debugging
                 stdout_output = stdout_capture.getvalue()
@@ -517,7 +564,7 @@ def process_folder(
         
         # Wait for DB writer to finish
         logger.info("Waiting for DB writer to complete...")
-        db_writer.join(timeout=60.0)
+        db_writer.join(timeout=10.0)
         
         if db_writer.is_alive():
             logger.warning("DB writer did not finish in time, terminating...")
@@ -638,6 +685,14 @@ def main():
         action="store_true",
         help="Never auto-download BirdNET model (exit if missing)"
     )
+    parser.add_argument(
+        "--extract-embeddings",
+        action="store_true",
+        default=EXTRACT_EMBEDDINGS_DEFAULT,
+        help="Extract embeddings (1024-dim feature vectors) for each detection. "
+             "Enables clustering and similarity analysis. Increases processing time by ~2x. "
+             f"(default: {'enabled' if EXTRACT_EMBEDDINGS_DEFAULT else 'disabled'})"
+    )
     
     args = parser.parse_args()
     
@@ -734,7 +789,8 @@ def main():
                 args.no_index,
                 translation_table,
                 birdnet_labels,
-                args.lang
+                args.lang,
+                extract_embeddings_flag=args.extract_embeddings
             )
             
             total_files_processed += files_processed
