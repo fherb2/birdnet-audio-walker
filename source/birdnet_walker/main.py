@@ -42,16 +42,22 @@ from .config import (
 from .audiomoth_import import extract_metadata
 from .species_translation import download_species_table
 from .birdnet_labels import get_available_languages, load_birdnet_labels
+
 from .database import (
     init_database, insert_metadata, db_writer_process, create_indices,
     cleanup_incomplete_files, get_completed_files, set_file_status,
-    get_missing_files, check_indices_exist, drop_all_indices, repair_orphaned_metadata
+    get_missing_files, check_indices_exist, drop_all_indices, repair_orphaned_metadata,
+    get_hdf5_path
 )
 from .birdnet_analyzer import (
     load_model, 
     analyze_file,
     extract_embeddings,
-    match_embeddings_to_detections
+    match_embeddings_to_detections,
+    write_embeddings_to_hdf5,
+    calculate_segment_times,     
+    find_needed_segments,         
+    filter_and_write_embeddings
 )
 
 from .progress import ProgressDisplay
@@ -328,6 +334,10 @@ def process_folder(
     db_path = folder_path / "birdnet_analysis.db"
     db_existed = db_path.exists()
     
+    # HDF5 path for embeddings (same folder as database)
+    hdf5_path = get_hdf5_path(str(db_path))
+    logger.debug(f"HDF5 embeddings file: {hdf5_path}")
+    
     # Initialize database if needed
     if not db_existed:
         init_database(str(db_path))
@@ -454,23 +464,56 @@ def process_folder(
                         min_confidence=confidence
                     )
                     
-                                # NEW: Extract embeddings if requested
+                # NEW: Extract embeddings if requested
                 if extract_embeddings_flag:
                     try:
                         logger.debug(f"Extracting embeddings for {filename}...")
                         
                         # Extract embeddings for entire file
-                        embeddings_array = extract_embeddings(
+                        # Returns: AcousticFileEncodingResult object
+                        embeddings_result = extract_embeddings(
                             file_path,
                             overlap_duration_s=OVERLAP_DURATION_S,
                             batch_size=BATCH_SIZE
                         )
                         
-                        # Match embeddings to detections based on timing
+                        # Get embeddings array (remove batch dimension)
+                        embeddings_array = embeddings_result.embeddings[0]
+                        
+                        logger.debug(f"Extracted {len(embeddings_array)} embeddings "
+                                   f"(segment={embeddings_result.segment_duration_s}s, "
+                                   f"overlap={embeddings_result.overlap_duration_s}s)")
+                        
+                        # Calculate segment times using ACTUAL parameters from result
+                        # This ensures consistency with what BirdNET actually used!
+                        segment_times = calculate_segment_times(
+                            n_segments=len(embeddings_array),
+                            segment_duration_s=embeddings_result.segment_duration_s,
+                            overlap_duration_s=embeddings_result.overlap_duration_s
+                        )
+                        
+                        # Find which segments we actually need (have detections)
+                        index_mapping = find_needed_segments(detections, segment_times)
+                        
+                        logger.info(f"Filtering embeddings: {len(index_mapping)}/{len(embeddings_array)} "
+                                   f"({len(index_mapping)/len(embeddings_array)*100:.1f}%) needed")
+                        
+                        # Filter and write only needed embeddings to HDF5
+                        embeddings_start_idx = filter_and_write_embeddings(
+                            embeddings_array,
+                            index_mapping,
+                            hdf5_path
+                        )
+                        
+                        logger.debug(f"Wrote {len(index_mapping)} filtered embeddings to HDF5 "
+                                   f"at index {embeddings_start_idx}")
+                        
+                        # Match embeddings to detections with correct time-based matching
                         detections = match_embeddings_to_detections(
                             detections,
-                            embeddings_array,
-                            segment_duration_s=SEGMENT_DURATION_S
+                            segment_times,
+                            index_mapping,
+                            embeddings_start_idx
                         )
                         
                         logger.debug(f"Successfully matched embeddings to {len(detections)} detections")
