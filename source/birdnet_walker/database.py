@@ -2,11 +2,28 @@
 SQLite database management for BirdNET Batch Analyzer.
 """
 
+#
+# Hinweis zu birdnet_play (oder anderen Auswertezugriffen):
+# ---------------------------------------------------------
+#
+# 1. HDF5-Datei wird schreibend nur in birdnet_analyzer.py verwaltet
+# 2. Zum Auslesen später (in birdnet_play):
+#    
+#    import h5py
+#    
+#    # Get embedding_idx from database
+#    cursor.execute("SELECT embedding_idx FROM detections WHERE id = ?", (det_id,))
+#    idx = cursor.fetchone()[0]
+#    
+#    # Load embedding from HDF5
+#    hdf5_path = get_hdf5_path(db_path)
+#    with h5py.File(hdf5_path, 'r') as f:
+#        embedding = f['embeddings'][idx]  # Shape: (1024,)
+
 import sqlite3
 from datetime import datetime, timedelta
 from loguru import logger
 import pandas as pd
-import numpy as np 
 
 from .species_translation import translate_species_name
 
@@ -46,7 +63,7 @@ def init_database(db_path: str):
         )
     """)
     
-    # Detections table (indices created later for performance)
+    # Detections table - WITH embedding_idx (points to HDF5 row)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS detections (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -60,7 +77,7 @@ def init_database(db_path: str):
             local_name TEXT,
             name_cs TEXT,
             confidence REAL NOT NULL,
-            embedding BLOB,
+            embedding_idx INTEGER,
             FOREIGN KEY (filename) REFERENCES metadata(filename)
         )
     """)
@@ -140,6 +157,7 @@ def insert_metadata(db_path: str, metadata: dict):
         conn.close()
 
 
+
 def batch_insert_detections(
     db_path: str,
     filename: str,
@@ -156,7 +174,7 @@ def batch_insert_detections(
         filename: Original WAV filename
         metadata: File metadata dict
         detections: List of detection dicts from BirdNET
-                   MAY contain 'embedding' key with numpy array
+                   MAY contain 'embedding_idx' key with integer index
         translation_table: Species translation table
         birdnet_labels: BirdNET labels dict
     """
@@ -187,20 +205,15 @@ def batch_insert_detections(
             detection_start_local = metadata['timestamp_local'] + timedelta(seconds=detection_start_seconds)
             detection_end_local = metadata['timestamp_local'] + timedelta(seconds=detection_end_seconds)
             
-            # NEW: Handle embedding if present
-            embedding_blob = None
-            if 'embedding' in detection and detection['embedding'] is not None:
-                # Convert numpy array to bytes (keep as float32)
-                embedding_array = detection['embedding'].astype(np.float32)
-                embedding_blob = embedding_array.tobytes()
-                logger.debug(f"Serialized embedding: {len(embedding_blob)} bytes")
+            # NEW: Get embedding index (integer) if present
+            embedding_idx = detection.get('embedding_idx', None)
             
-            # Insert detection WITH embedding column
+            # Insert detection WITH embedding_idx column
             cursor.execute("""
                 INSERT INTO detections 
                 (filename, segment_start_utc, segment_start_local, 
                  segment_end_utc, segment_end_local, timezone,
-                 scientific_name, local_name, name_cs, confidence, embedding)
+                 scientific_name, local_name, name_cs, confidence, embedding_idx)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 filename,
@@ -213,7 +226,7 @@ def batch_insert_detections(
                 names['local'],
                 names['cs'],
                 detection['confidence'],
-                embedding_blob  # NEW: Embedding as BLOB or None
+                embedding_idx  # NEW: HDF5 row index or None
             ))
         
         # Commit transaction
@@ -235,6 +248,8 @@ def batch_insert_detections(
         conn.rollback()
     finally:
         conn.close()
+
+
 
 def db_writer_process(
     result_queue,
@@ -602,6 +617,27 @@ def get_missing_files(db_path: str, wav_files: list[str]) -> list[str]:
         
     finally:
         conn.close()
+        
+        
+
+def get_hdf5_path(db_path: str) -> str:
+    """
+    Get HDF5 file path for given database path.
+    
+    Args:
+        db_path: Path to SQLite database
+        
+    Returns:
+        Path to HDF5 file (same folder as DB)
+    """
+    from pathlib import Path
+    from .config import HDF5_FILENAME
+    
+    db_path = Path(db_path)
+    hdf5_path = db_path.parent / HDF5_FILENAME
+    
+    return str(hdf5_path)
+
         
 
 def vacuum_database(db_path: str):
