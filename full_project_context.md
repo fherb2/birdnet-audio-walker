@@ -21,6 +21,9 @@ Das Projekt besteht aus zwei Hauptkomponenten:
    - GPU-beschleunigt (CUDA erforderlich)
    - Erstellt SQLite-Datenbanken pro Ordner
    - Performance: RTX A6000 @ ~20s pro 6h-Aufnahme (vs. CPU @ 12-30h)
+   - **Embedding-Extraktion:** Optional 1024-dimensionale Feature-Vektoren
+   - Speicherung in separater HDF5-Datei (effizient, komprimiert)
+   - Verwendung: Clustering, Ähnlichkeitssuche, False-Positive-Erkennung
 
 2. **BirdNET Play** - Audio-Playback & Web-Interface
    - Streamlit-basierte Web-UI für komfortable Durchsicht
@@ -36,12 +39,20 @@ AudioMoth im Feld
 Aufnahmen (typisch: 500h+ pro Gerät, ~2GB pro 6h-File)
     ↓
 Analyse mit birdnet-walker (GPU/CUDA)
+  ├─> Detections (Confidence, Species, Zeit)
+  └─> Embeddings (optional, 1024-dim Vektoren)
     ↓
 SQLite-Datenbank pro Ordner
+  ├─> detections (mit embedding_idx)
+  └─> metadata, processing_status, analysis_config
+    ↓
+HDF5-Datei pro Ordner (falls Embeddings aktiviert)
+  └─> birdnet_embeddings.h5 (komprimierte Vektoren)
     ↓
 Durchsicht mit birdnet-play (Streamlit)
     ↓
 Identifikation von Besonderheiten/seltenen Arten
+  + Clustering & Ähnlichkeitsanalyse (Embeddings)
 ```
 
 ### 1.4 Deployment
@@ -65,6 +76,8 @@ Identifikation von Besonderheiten/seltenen Arten
 
 **Audio & AI:**
 - BirdNET 0.2.x (TensorFlow + CUDA für GPU-Beschleunigung)
+- h5py für HDF5-Speicherung (Embeddings)
+- numpy für Array-Operationen
 - edge-tts für Text-to-Speech
 - pydub für Audio-Manipulation
 - sounddevice/soundfile für Audio-I/O
@@ -90,7 +103,8 @@ Identifikation von Besonderheiten/seltenen Arten
 
 **Für birdnet-walker:**
 - CUDA-fähige GPU (essentiell!)
-- Beispiel-Performance: RTX A6000 @ 20s/6h-File
+- Beispiel-Performance: RTX A6000 @ 60s/6h-File (ohne Embeddings)
+- Mit Embeddings: ~40s/6h-File (2x längere Laufzeit)
 - CPU-Fallback: 2-5x Realtime (nicht praktikabel für große Datenmengen)
 
 **Für birdnet-play:**
@@ -108,6 +122,7 @@ birdnet-walker/
 ├── pyproject.toml              # Poetry-Konfiguration, Dependencies
 ├── README.md                   # Projekt-Übersicht
 ├── readme_2.md                 # Erweiterte technische Dokumentation
+├── full_project_context.md     # Diese Datei - Vollständige Dokumentation
 │
 └── source/                     # Alle Python-Module
     │
@@ -164,8 +179,11 @@ altair = "^5.0.0"                # Heatmap visualization
 
 **Verwendung:**
 ```bash
-# Walker: Analyse starten
+# Walker: Analyse starten (ohne Embeddings)
 poetry run birdnet-walker /path/to/recordings --recursive
+
+# Walker: Analyse mit Embeddings (empfohlen für Clustering)
+poetry run birdnet-walker /path/to/recordings --recursive --extract-embeddings
 
 # Play: Streamlit UI
 poetry run birdnet-play /path/to/db.db --ui
@@ -189,17 +207,24 @@ poetry run birdnet-play /path/to/db.db --species "Parus major"
 recordings/
 ├── site_A/
 │   ├── birdnet_analysis.db
+│   ├── birdnet_embeddings.h5 
 │   ├── 20250416_060000.WAV
 │   └── 20250416_120000.WAV
 └── site_B/
     ├── birdnet_analysis.db
+    ├── birdnet_embeddings.h5
     └── ...
-```
 
 **Vorteile:**
 - Unabhängige Verwaltung pro Standort/Session
 - Einfaches Kopieren/Archivieren
 - Parallele Verarbeitung möglich
+
+**HDF5-Datei:**
+- `birdnet_embeddings.h5` liegt im gleichen Ordner wie die DB
+- Enthält nur Embeddings für Detections (nicht alle Segmente)
+- Komprimiert mit gzip (Level 4), dtype float32
+- Chunk-Size: 1000 Zeilen für optimalen Zugriff
 
 ### 4.2 Tabellen-Schema
 
@@ -243,6 +268,7 @@ CREATE TABLE detections (
     local_name TEXT,                    -- Name in gewählter Sprache (--lang)
     name_cs TEXT,                       -- Tschechischer Name
     confidence REAL NOT NULL,           -- 0.0-1.0
+    embedding_idx INTEGER,              -- NEU: Index in HDF5 (oder NULL)
     FOREIGN KEY (filename) REFERENCES metadata(filename)
 )
 
@@ -257,6 +283,14 @@ CREATE INDEX idx_detections_filename ON detections(filename);
 segment_start_utc = file_timestamp_utc + detection_start_time
 ```
 wobei `detection_start_time` der Offset in Sekunden vom Datei-Anfang ist (von BirdNET geliefert).
+
+**Embedding-Index:**
+
+embedding_idx = kompakter Index in birdnet_embeddings.h5
+
+- NULL wenn --extract-embeddings nicht verwendet
+- Kompakte Nummerierung (0, 1, 2, ...) ohne Lücken
+- Referenziert Zeile in HDF5: embeddings[embedding_idx]
 
 #### **Tabelle: `processing_status`**
 Tracking für Resume-Funktionalität (ermöglicht Neustart nach Absturz).
@@ -313,6 +347,44 @@ CREATE TABLE IF NOT EXISTS species_list (
 - 10x @ 0.9 conf → score ≈ 6.56
 - 100x @ 0.3 conf → score ≈ 0.81
 - → Qualität schlägt Quantität
+
+
+### 4.2 HDF5-Struktur (Embeddings)
+
+**Datei:** `birdnet_embeddings.h5` (im gleichen Ordner wie SQLite-DB)
+
+**Dataset:** `embeddings`
+- Shape: (n_detections, 1024)
+- Dtype: float32
+- Compression: gzip level 4
+- Chunk size: (1000, 1024)
+
+**Eigenschaften:**
+- Nur Embeddings für tatsächliche Detections (nicht alle Segmente!)
+- Kompakte Indizierung: Zeile 0-499 für 500 Detections
+- Resizable Dataset (maxshape=(None, 1024))
+
+**Zugriff:**
+```python
+import h5py
+import sqlite3
+
+# 1. Embedding-Index aus SQLite laden
+conn = sqlite3.connect('birdnet_analysis.db')
+cursor = conn.cursor()
+cursor.execute("SELECT embedding_idx FROM detections WHERE id = ?", (detection_id,))
+embedding_idx = cursor.fetchone()[0]
+conn.close()
+
+# 2. Embedding aus HDF5 laden
+with h5py.File('birdnet_embeddings.h5', 'r') as f:
+    embedding = f['embeddings'][embedding_idx]  # Shape: (1024,)
+```
+
+**Konsistenz-Garantien:**
+- Gleiche Zeitfenster in analyze_file() und extract_embeddings()
+- Detection-Zeit == Segment-Zeit → Exakte Zuordnung
+- Keine Lücken in embedding_idx (kompakte Nummerierung)
 
 ### 4.3 Datenbank-Zugriff
 
@@ -385,13 +457,45 @@ CONFIDENCE_THRESHOLD_HIGH = 0.7  # Schwelle für "gute" Detections
 
 **Hauptmodule:**
 - `main.py` - Orchestrierung, Multiprocessing
-- `config.py` - Zentrale Konstanten (BirdNET-Parameter, Pfade)
+- `config.py` - Zentrale Konstanten (BirdNET-Parameter, HDF5-Config, Pfade)
 - `database.py` - Schema-Creation, Write-Operations
 - `birdnet_analyzer.py` - BirdNET-Wrapper
 - `audiomoth_import.py` - GUANO-Metadata-Parsing
 - `species_translation.py` - Tschechische Namen von karlincam.cz
 - `birdnet_labels.py` - Mehrsprachige Namen aus BirdNET-Labels
 - `progress.py` - Konsolen-Progress-Bar
+
+**Wichtige Config-Konstanten (config.py):**
+```python
+# Embedding Extraction
+EXTRACT_EMBEDDINGS_DEFAULT = True       # Default für --extract-embeddings
+EMBEDDING_DIMENSIONS = 1024             # BirdNET v2.4 embedding size
+SEGMENT_DURATION_S = 3.0                # Segment-Länge (fix bei BirdNET)
+OVERLAP_DURATION_S = 0.75               # Overlap zwischen Segmenten
+
+# HDF5 Storage
+HDF5_FILENAME = "birdnet_embeddings.h5"
+HDF5_DATASET_NAME = "embeddings"
+HDF5_DTYPE = 'float32'
+HDF5_COMPRESSION = 'gzip'
+HDF5_COMPRESSION_LEVEL = 4
+HDF5_CHUNK_SIZE = 1000
+```
+
+**Wichtige Funktionen in birdnet_analyzer.py:**
+- `extract_embeddings()` - Extrahiert 1024-dim Vektoren für alle Segmente
+- `calculate_segment_times()` - Berechnet Zeitfenster mit korrektem Overlap
+- `find_needed_segments()` - Findet Segmente mit Detections (Zeit-Match)
+- `filter_and_write_embeddings()` - Filtert und schreibt nur benötigte Embeddings
+- `match_embeddings_to_detections()` - Ordnet Embeddings zu via exakte Zeit
+- `create_or_open_hdf5()` - Erstellt/öffnet HDF5-Datei mit korrektem Schema
+- `write_embeddings_to_hdf5()` - Schreibt Embeddings und gibt Start-Index zurück
+
+**Wichtige Funktionen in database.py:**
+- `get_hdf5_path()` - Ermittelt HDF5-Pfad aus DB-Pfad
+
+
+
 
 ### 5.3 birdnet_play/ - Audio-Playback & Web-Interface
 
@@ -1009,6 +1113,88 @@ language_code = get_analysis_config(db_path, 'local_name_shortcut')
 # Default: 'de'
 ```
 
+### 6.8 Embedding-Extraktion und -Speicherung
+
+**Was sind Embeddings?**
+- 1024-dimensionale Feature-Vektoren aus BirdNET's internem Netzwerk
+- Repräsentieren Audio-Charakteristiken (Frequenzen, Muster, etc.)
+- Verwendung: Clustering, Ähnlichkeitssuche, False-Positive-Erkennung
+
+**Workflow in main.py:**
+```python
+# Phase 1: Detections ermitteln
+detections = analyze_file(
+    file_path,
+    overlap_duration_s=OVERLAP_DURATION_S  # z.B. 0.75s
+)
+
+# Phase 2: Embeddings extrahieren (falls --extract-embeddings)
+if extract_embeddings_flag:
+    # 2a. Alle Embeddings extrahieren
+    result = extract_embeddings(
+        file_path,
+        overlap_duration_s=OVERLAP_DURATION_S  # MUSS identisch sein!
+    )
+    embeddings_array = result.embeddings[0]  # Shape: (7200, 1024)
+    
+    # 2b. Segment-Zeiten berechnen (mit Overlap!)
+    segment_times = calculate_segment_times(
+        n_segments=len(embeddings_array),
+        segment_duration_s=result.segment_duration_s,  # 3.0s
+        overlap_duration_s=result.overlap_duration_s   # 0.75s
+    )
+    # Returns: [(0.0, 3.0), (2.25, 5.25), (4.5, 7.5), ...]
+    
+    # 2c. Nur benötigte Segmente finden (exakte Zeit-Matches)
+    index_mapping = find_needed_segments(detections, segment_times)
+    # Returns: {5: 0, 12: 1, 13: 2, ...}  # old_idx -> compact_idx
+    
+    # 2d. Nur benötigte Embeddings speichern
+    start_idx = filter_and_write_embeddings(
+        embeddings_array,    # Alle 7200 Embeddings
+        index_mapping,       # Nur 500 behalten
+        hdf5_path
+    )
+    # Schreibt nur 500 Embeddings in HDF5!
+    
+    # 2e. Detections mit Indices verknüpfen
+    detections = match_embeddings_to_detections(
+        detections,
+        segment_times,
+        index_mapping,
+        start_idx
+    )
+    # Jede Detection bekommt embedding_idx
+```
+
+**Kritische Konsistenz-Regel:**
+```python
+# BEIDE müssen EXAKT gleiche Parameter haben:
+analyze_file(..., overlap_duration_s=X)
+extract_embeddings(..., overlap_duration_s=X)
+
+# Sonst passen die Zeitfenster NICHT zusammen!
+```
+
+**Zeit-basiertes Matching:**
+Detection: 2:03:22.721 - 2:03:25.721
+Segment:   2:03:22.721 - 2:03:25.721  ← EXAKTE Übereinstimmung!
+
+BirdNET nutzt identische Segmentierung für beide Phasen
+→ Exakte Zeit bedeutet exaktes Segment
+
+**Speicher-Effizienz:**
+6h-Datei = 7200 Segmente (alle 2.25s ein neues bei 0.75s Overlap)
+500 Detections = nur 500 Embeddings gespeichert
+→ 93% Speicherersparnis!
+
+**Kompakte Indizierung:**
+Original-Segmente: [5, 12, 13, 20, ...]
+HDF5-Indices:      [0,  1,  2,  3, ...]  # Keine Lücken!
+SQLite speichert: embedding_idx = 0, 1, 2, 3, ...
+HDF5 Zeile 0 = Original-Segment 5
+HDF5 Zeile 1 = Original-Segment 12
+
 ---
 
 ## 7. Typische Entwicklungs-Szenarien
@@ -1168,6 +1354,55 @@ audio_options = {
 }
 ```
 
+### 7.6 "Embeddings für Clustering nutzen"
+
+**Anwendungsfall:** Ähnliche Detections gruppieren, False-Positives finden.
+
+**Betroffene Files:**
+1. Neue Analyse-Scripts außerhalb des Hauptprojekts
+2. `shared/db_queries.py` - Evtl. neue Query-Funktionen
+3. Dokumentation
+
+**Beispiel-Workflow:**
+```python
+import h5py
+import sqlite3
+import numpy as np
+from sklearn.cluster import DBSCAN
+
+# 1. Lade alle Embeddings für eine Species
+conn = sqlite3.connect('birdnet_analysis.db')
+cursor = conn.cursor()
+cursor.execute("""
+    SELECT id, embedding_idx, confidence
+    FROM detections
+    WHERE scientific_name = 'Parus major'
+    AND embedding_idx IS NOT NULL
+""")
+detections = cursor.fetchall()
+conn.close()
+
+# 2. Lade Embeddings aus HDF5
+with h5py.File('birdnet_embeddings.h5', 'r') as f:
+    embeddings = f['embeddings']
+    vectors = np.array([embeddings[idx] for _, idx, _ in detections])
+
+# 3. Clustering (z.B. DBSCAN)
+clustering = DBSCAN(eps=0.3, min_samples=5, metric='cosine')
+labels = clustering.fit_predict(vectors)
+
+# 4. Analyse: Welche Cluster haben niedrige Confidence?
+for cluster_id in set(labels):
+    if cluster_id == -1:
+        continue  # Noise
+    
+    cluster_detections = [d for d, l in zip(detections, labels) if l == cluster_id]
+    avg_confidence = np.mean([conf for _, _, conf in cluster_detections])
+    
+    print(f"Cluster {cluster_id}: {len(cluster_detections)} detections, "
+          f"avg confidence: {avg_confidence:.2f}")
+```
+
 ---
 
 ## 8. Debugging & Logging
@@ -1223,6 +1458,34 @@ logger.add(sys.stderr, level="INFO")
 **"GPU out of memory" (Walker)**
 - Ursache: Batch-Size zu groß
 - Fix: `BATCH_SIZE` in `config.py` reduzieren
+
+### 8.4 Embedding-Konsistenz testen
+
+**Test-Script:** `test_embedding_consistency.py`
+
+**Verwendung:**
+```bash
+python test_embedding_consistency.py /path/to/recordings/folder
+```
+
+**Was getestet wird:**
+- HDF5 Data Integrity (Shape, dtype, keine NaN/Inf)
+- SQLite Embedding Indices (>95% sollten Embeddings haben)
+- Index Range Validation (alle Indices im gültigen Bereich)
+- **Time-based Consistency** (gleiche Zeit → gleicher Index)
+- No Orphaned Embeddings (<5% ungenutzt)
+- Segmentation Consistency (~3.0s Segmente)
+
+**Erwartete Ausgabe bei erfolgreicher Validierung:**
+```
+================================================================================
+ALL TESTS PASSED ✓
+```
+
+**Häufige Fehlerquellen:**
+- Unterschiedliche `overlap_duration_s` Parameter → Zeit-Inkonsistenz
+- Corrupt HDF5-Datei → Data Integrity Test schlägt fehl
+- DB-Schema-Mismatch → Index Range Test schlägt fehl
 
 ---
 
@@ -1486,12 +1749,26 @@ Füge NACH dieser Zeile ein: ..."
 
 Wenn größere Änderungen gemacht werden, hier dokumentieren:
 
-### Version 0.1.0 (Initial)
-- BirdNET Walker: Batch-Analyse mit CUDA
-- BirdNET Play: CLI + Streamlit UI
-- Grundfunktionalität: Filter, Playback, Export
+### Version 0.3.0 (aktuell - 8. Februar 2026)
+- **Embedding-Extraktion:** 1024-dim Feature-Vektoren optional extrahierbar
+  - `--extract-embeddings` Flag für birdnet-walker
+  - Speicherung in separater HDF5-Datei (birdnet_embeddings.h5)
+  - Kompakte Indizierung (nur Detections, keine Lücken)
+  - Zeit-basiertes Matching (exakte Übereinstimmung)
+- **Neue Funktionen in birdnet_analyzer.py:**
+  - `extract_embeddings()` - 1024-dim Vektoren für alle Segmente
+  - `calculate_segment_times()` - Korrekte Zeitberechnung mit Overlap
+  - `find_needed_segments()` - Zeit-basiertes Filtering
+  - `filter_and_write_embeddings()` - Kompakte Speicherung
+  - `match_embeddings_to_detections()` - Exakte Zeit-Zuordnung
+  - `create_or_open_hdf5()` / `write_embeddings_to_hdf5()` - HDF5-Management
+- **Datenbank-Schema:** `embedding_idx INTEGER` in detections-Tabelle
+- **Config-Updates:** EXTRACT_EMBEDDINGS_DEFAULT, HDF5_* Parameter
+- **Test-Suite:** test_embedding_consistency.py für Validierung
+- **Breaking Change:** OVERLAP_DURATION_S default 0.75s (war 0.0s)
+- **Dokumentation:** Vollständiger Embedding-Workflow dokumentiert
 
-### Version 0.2.0 (aktuell - 24. Januar 2026)
+### Version 0.2.0 (24. Januar 2026)
 - **Neue Page:** Activity Heatmap (Altair-basiert)
   - 2D-Visualisierung: Datum × Tageszeit (30-Min-Intervalle)
   - Interaktive Zell-Auswahl mit Audio-Dialog
@@ -1509,6 +1786,10 @@ Wenn größere Änderungen gemacht werden, hier dokumentieren:
 - **time_range Filter:** Präzise Tageszeit-Filterung in Queries
 - **Breaking Change:** `extract_snippet()` gibt jetzt Tuple zurück: `(audio_data, sample_rate)`
 
+### Version 0.1.0 (Initial)
+- BirdNET Walker: Batch-Analyse mit CUDA
+- BirdNET Play: CLI + Streamlit UI
+- Grundfunktionalität: Filter, Playback, Export
 
 ---
 
@@ -1518,9 +1799,14 @@ Wenn größere Änderungen gemacht werden, hier dokumentieren:
 
 1. **Projekt:** Vogelstimmen-Analyse mit BirdNET + Playback-UI
 2. **Struktur:** 3 Module - `birdnet_walker/` (Analyse), `birdnet_play/` (Playback + Heatmap), `shared/` (Common)
-3. **Datenbank:** Eine SQLite-DB pro Ordner mit 5 Tabellen (metadata, detections, processing_status, analysis_config, species_list)
+3. **Datenbank:** Eine SQLite-DB + eine HDF5-Datei pro Ordner
+   - SQLite: 5 Tabellen (metadata, detections mit embedding_idx, processing_status, analysis_config, species_list)
+   - HDF5: Komprimierte Embedding-Vektoren (1024-dim, float32, nur für Detections)
 4. **UI:** Streamlit mit 3 Pages - (1) DB Overview + Species List, (2) Audio Player + Filter, (3) Activity Heatmap
-5. **Audio:** Extraktion + Processing (Fade, LUFS, Compression) + TTS + Sequential Playback
+5. **Audio & Embeddings:** 
+   - Extraktion + Processing (Fade, LUFS, Compression) + TTS + Sequential Playback
+   - Optional: 1024-dim Feature-Vektoren für Clustering & Ähnlichkeitssuche
+
 
 **Wichtigste Files für Änderungen:**
 - `shared/db_queries.py` - Alle DB-Queries

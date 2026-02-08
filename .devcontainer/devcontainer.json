@@ -3,10 +3,11 @@
     "name": "birdnet_walker",
     // The image to create the container:
     // With CUDA (GPU use only for Birdnet analyzing):
-    "image": "registry.hzdr.de/fwf/libraries/dockerfiles/devcontainers-python-cuda-imageprocessing/birdnet_x86-64_ubuntu24.04_py3.12_poet_jp4_cuda12.8.0-run:rel-1.7.1-d5f6be",
+    "image": "registry.hzdr.de/fwf/libraries/dockerfiles/devcontainers-python-cuda-imageprocessing/birdnet_x86-64_ubuntu24.04_py3.12_poet_jp4_cuda12.8.0-run_hdfview:rel-1.8.0-aa8fae",
+
 
     // without CUDA (after birdnet analyzing is done):
-    //"image": "registry.hzdr.de/fwf/libraries/dockerfiles/devcontainers-python-cuda-imageprocessing/birdnet_x86-64_ubuntu24.04_py3.12_poet_jp4:rel-1.7.1-0788f4",
+    //"image": "registry.hzdr.de/fwf/libraries/dockerfiles/devcontainers-python-cuda-imageprocessing/birdnet_x86-64_ubuntu24.04_py3.12_poet_jp4_hdfview:rel-1.8.0-31a1fb",
 
     // see: https://code.visualstudio.com/remote/advancedcontainers/start-processes
     // -> "When referencing a Dockerfile in devcontainer.json, the default entrypoint
@@ -46,12 +47,24 @@
         "--network=host",
         "--shm-size=4gb",
         "--gpus=all",
+        "--cap-add=NET_BIND_SERVICE", // !!! wieder weg nehmen mit neuem Image!
         // "--cap-add=SYS_ADMIN",
         // "--security-opt=seccomp=unconfined",
         "-v", "/run/user/1000/ssh-agent.sock:/ssh-agent",
         "-e", "SSH_AUTH_SOCK=/ssh-agent",
         "--device=/dev/snd"
       ],
+
+    "forwardPorts": [8080],
+      
+      // Optional: Port-Attribute für bessere Kontrolle
+      "portsAttributes": {
+        "8080": {
+          "label": "JupyterLab",
+          "onAutoForward": "notify"
+        }
+      },
+
     "containerEnv": {
       "TZ": "Europe/Berlin",
       "NVIDIA_VISIBLE_DEVICES": "99",
