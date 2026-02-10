@@ -2,6 +2,9 @@
 # sudo apt-get install -y pulseaudio-utils alsa-utils
 
 Python:
+llvmlite>=0.43.0
+umap-learn>=0.5.11
+nbformat ^5.10.4
 # streamlit = ^1.53.0 
 # pedalboard = "^0.9.0"      # Audio compression and effects
 # pyloudnorm = "^0.1.1"      # LUFS loudness normalization
