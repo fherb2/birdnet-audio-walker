@@ -1,8 +1,8 @@
 # Konzept: Hierarchisches Vektordatenbank-System mit DiskANN
 
-**Version:** 1.0  
-**Datum:** 10. Februar 2026  
-**Status:** Konzeptphase  
+**Version:** 2.0
+**Datum:** 10. Februar 2026
+**Status:** Konzeptphase
 
 ---
 
@@ -10,21 +10,21 @@
 
 ### 1.1 Die zentrale Idee
 
-Das bestehende BirdNET-Walker-System speichert derzeit für jeden Aufnahme-Ordner eine separate HDF5-Datei mit Embedding-Vektoren. Diese Embeddings sind 1024-dimensionale Feature-Vektoren, die aus dem BirdNET-Modell extrahiert werden und die akustischen Eigenschaften jeder Detection repräsentieren. Das funktioniert gut für die lokale Speicherung, aber es gibt ein fundamentales Problem: Die Embeddings sind über viele einzelne Dateien verstreut, und es gibt keine Möglichkeit, schnell nach ähnlichen Detections über alle Aufnahme-Sessions hinweg zu suchen.
+Das bestehende BirdNET-Walker-System speichert derzeit für jeden Aufnahme-Ordner eine separate HDF5-Datei mit Embedding-Vektoren. Diese Embeddings sind 1024-dimensionale Feature-Vektoren, die aus dem BirdNET-Modell extrahiert werden und die akustischen Eigenschaften jeder Detection repräsentieren. Das funktioniert gut für die lokale Speicherung zugehörig zu den Audiofiles und Detektionen des Verzeichnisses auf der gleichen Ebene. Aber es gibt ein fundamentales Problem: Die Embeddings sind über viele einzelne Dateien verstreut, wenn es mehrere derartiger Ordner gibt, in denen man die Audiofiles und Detektionen sortiert. Es gibt dann keine Möglichkeit, schnell nach ähnlichen Detections global über alle Aufnahme-Sessions hinweg zu suchen. 
 
-Die neue Architektur führt ein hierarchisches System ein, bei dem Vektordatenbanken auf verschiedenen Ebenen existieren können. Eine lokale Vektordatenbank liegt direkt bei den Audiofiles und speichert alle Embeddings dieser Session. Übergeordnete Ordner können globale Vektordatenbanken enthalten, die automatisch alle Embeddings aus untergeordneten Sessions aggregieren. Das Besondere: Diese Aggregation erfolgt ohne Duplikate und mit minimaler Redundanz.
+Die neue Architektur führt ein hierarchisches System ein, bei dem Vektordatenbanken auf verschiedenen Ebenen existieren können. Eine lokale Vektordatenbank liegt direkt bei den Audiofiles und speichert alle Embeddings dieser Session. Übergeordnete Ordner können globale Vektordatenbanken enthalten, die automatisch alle Embeddings aus untergeordneten Sessions aggregieren. Auch die Erkennungen werden entsprechend globaler zusammengeführt.
 
-### 1.2 Warum DiskANN?
+### 1.2 Warum DiskANN als Embedding-Vektor Datenbank?
 
-Der Wechsel von HDF5 zu DiskANN hat einen spezifischen Grund: DiskANN ist eine Vektordatenbank-Technologie von Microsoft Research, die speziell dafür entwickelt wurde, Milliarden von hochdimensionalen Vektoren effizient auf SSDs zu speichern und schnelle Nearest-Neighbor-Suchen zu ermöglichen. Im Gegensatz zu HDF5, das eine reine Speichertechnologie ist, baut DiskANN einen Index auf, der Ähnlichkeitssuchen dramatisch beschleunigt.
+Der Wechsel von HDF5 zu DiskANN hat einen spezifischen Grund: DiskANN ist eine Vektordatenbank-Technologie von Microsoft Research, die speziell dafür entwickelt wurde, Milliarden von hochdimensionalen Vektoren effizient auf SSDs zu speichern und schnelle Nearest-Neighbor-Suchen zu ermöglichen. Im Gegensatz zu HDF5, das eine reine Speichertechnologie ist, baut DiskANN einen Index auf, der Ähnlichkeitssuchen dramatisch beschleunigt, ohne gezwungen zu sein, die Daten im Ganzen im Arbeitsspeicher zu halten.
 
-Das ist entscheidend für die biologische Fragestellung: Ein Biologe hat vielleicht in einer Session einen Cluster von Detections gefunden, der wie eine Fehlklassifikation aussieht. Mit DiskANN kann er fragen: "Finde alle ähnlichen Detections in allen meinen anderen Sessions". Diese Query würde über potentiell Millionen von Vektoren laufen und muss trotzdem in wenigen Sekunden Ergebnisse liefern. HDF5 kann das nicht leisten – man müsste alle Vektoren laden und manuell Distanzen berechnen, was bei großen Datenmengen unpraktikabel ist.
+Das ist entscheidend für die biologische Fragestellung: Ein Nutzere hat vielleicht in einer Session einen Cluster von Detections gefunden, der wie eine Fehlklassifikation aussieht. Mit DiskANN kann er fragen: "Finde alle ähnlichen Detections in allen meinen anderen Sessions". Diese Query würde über potentiell Millionen von Vektoren laufen und muss trotzdem in wenigen Sekunden Ergebnisse liefern. Weder HDF5, noch Zarr noch eine SQL-Datenbank kann das leisten – man müsste alle Vektoren laden und manuell Distanzen berechnen, was bei großen Datenmengen völlig unpraktikabel ist.
 
 ### 1.3 Die biologische Perspektive
 
-Aus biologischer Sicht ist das System so konzipiert, dass die Embeddings modell-intrinsisch sind, nicht standort-spezifisch. Das bedeutet: Ein Kohlmeisen-Reviergesang hat überall ähnliche Embeddings, egal wo er aufgenommen wurde. Wenn BirdNET einen Blaumeisen-Ruf fälschlicherweise als Kohlmeise klassifiziert, wird dieser Fehler ebenfalls überall ähnliche Embeddings produzieren.
+Aus biologischer Sicht ist das System so konzipiert, dass die Embeddings modell-intrinsisch sind, nicht standort-spezifisch. Das bedeutet: Ein Kohlmeisen-Reviergesang hat überall ähnliche Embeddings, egal wo er aufgenommen wurde. Sofern das gleiche Modell zur Erkennung (BirdNET der gleichen Version) verwendet wurde. Wenn BirdNET einen Blaumeisen-Ruf fälschlicherweise als Kohlmeise klassifiziert, wird dieser Fehler ebenfalls überall ähnliche Embeddings produzieren.
 
-Das ermöglicht systematische Qualitätskontrolle: Einmal einen Fehler identifiziert, können alle ähnlichen Fälle in allen Sessions gefunden und korrigiert werden. Das ist der Kern des Mehrwerts – nicht nur lokale Analyse, sondern cross-site Pattern Recognition.
+Das ermöglicht systematische Qualitätskontrolle: Einmal einen Fehler identifiziert, können alle ähnlichen Fälle in allen Sessions gefunden und korrigiert werden. Das ist der Kern des Mehrwerts – nicht nur lokale Analyse, sondern cross-site Pattern Recognition. Es ist auch die Ausgangsbasis dafür, durch die Erweiterung des Modells solche "Schwächen" auszumerzen.
 
 ---
 
@@ -34,25 +34,33 @@ Das ermöglicht systematische Qualitätskontrolle: Einmal einen Fehler identifiz
 
 Die neue Architektur basiert auf einem einfachen Prinzip: Jede Datenbank (ob lokal oder global) besteht aus genau zwei Komponenten – einer SQLite-Datei und einem DiskANN-Index. Die Benennung dieser Dateien signalisiert automatisch ihren Typ:
 
-Lokale Datenbanken bei den Audiofiles heißen `birdnet_analysis.db` und haben einen zugehörigen DiskANN-Index `birdnet_vectors.diskann/`. Diese lokalen Datenbanken werden vom bestehenden birdnet-walker erstellt und enthalten alle Detections und Embeddings einer Aufnahme-Session.
+Lokale Datenbanken bei den Audiofiles heißen `birdnet_analysis.db` und haben einen zugehörigen DiskANN-Index `birdnet_vectors.diskann/`. Diese lokalen Datenbanken werden vom bestehenden birdnet-walker erstellt und enthalten alle Detections und Embeddings einer Aufnahme-Session, die als Ordner im Dateisystem abgebildet ist.
 
-Globale Datenbanken in übergeordneten Ordnern heißen `birdnet_global.db` und haben einen Index `birdnet_vectors_global.diskann/`. Diese werden von einem neuen Tool erstellt, dem birdnet-global-sync, der alle untergeordneten lokalen Datenbanken findet und deren Inhalte aggregiert.
+Globale Datenbanken in übergeordneten Ordnern heißen `birdnet_global.db` und haben einen Index `birdnet_vectors_global.diskann/`. Da der birdnet-walker dafür ausgelegt ist, ganze Ordnerstrukturen rekursiv zu durchsuchen und neue Daten zu sammeln (neue Ordner oder neue Audio-Dateien in Ordnern), wird dieser im Rahmen dieses Konzepts um die gloable Methodik erweitert. Freigeschaltet wird diese Option durch die Option -g / --global.
 
-Der Clou: Globale Datenbanken können beliebig tief verschachtelt werden. Ein Ordner "projekt_2024" kann eine globale Datenbank haben, die alle Standorte dieses Jahres aggregiert. Ein Ordner "alle_projekte" kann eine weitere globale Datenbank haben, die mehrere Jahre aggregiert. Das System erkennt automatisch, welche Datenbanken zu welcher Ebene gehören, und verhindert, dass globale Datenbanken sich gegenseitig importieren.
+Um es nochmal zusammenzustellen:
+
+* ohne die Optionen -r/--recursive oder/und -g/--global: es wird nur der aktuelle Ordner, der als Pfad übergeben wird, durchsucht und die lokalen Datenbanken (`birdnet_analysis.db` und `birdnet_vectors.diskann/`) werden angelegt oder mit den Ergennissen noch nicht bearbeiteter Audiofiles erweitert.
+* mit Option -r/--recursive: Es werden ab dem angegebenen Pfad alles in diesem Ordner und darunter durchsucht und dort die einzelnen Datenbanken angelegt bzw. erweitert.
+* mit Option -g/--global (egal, ob -r/--recursive angegeben ist): Es werden die gleichen Operationen recursiv ausgeführt, wie mit der Option -r/--recursive, zusätzlich wird auf der obersten Ebene (also der, die als Pfad angegeben wurde) eine globale Datenbank `birdnet_global.db` und `birdnet_vectors_global.diskann/` angelegt beziehungsweise erweitert.
+
+Die Embedding-Vektoren werden dabei in allen Fällen nur gesammelt, wenn das mit dem zusätzlichen Argument --extract-embeddings gefordert wird!
+
+Zu bemerken ist, dass im bisherigen Zustand aber auch für die neue Funktion gilt: Es wird nicht doppelt indiziert. Immer nur neue Audios bzw. ganze neue Ordner mit Audios werden als neu erkannt, dann mit BirdNET analysiert und dann die Daten lokal (im Ordner der Audio-Datei) und zusätzlich in der globalen Datenbank (ganz oben liegenden Datenbank) zugefügt.
+
+Der Clou: Globale Datenbanken können damit im Prinzip beliebig tief verschachtelt werden. Ein Ordner "projekt_2024" kann eine globale Datenbank haben, die alle Standorte dieses Jahres aggregiert. Ein Ordner "alle_projekte" kann darüber liegend eine weitere globale Datenbank hat, die mehrere Jahre aggregiert. Für diesen Fall startet man den birdnet-walker beginnend von "unten" in mehreren Ebenen. Lokale Datenbanken werden nur einmal erstellt, da auch bei einer Analyse aus einer "oberen Etage" die Erkennungsdaten weiter unten erkannt werden und nicht nochmal eine Erkennung beginnt. Es wird dann immer geprüft, welche Daten in den jeweiligen Ebenen neu sind und in der Ausgangseben der recursiven Suche gesammelt.
 
 ### 2.2 Datenfluss im neuen System
 
-Der Datenfluss beginnt wie bisher mit dem birdnet-walker. Der Nutzer analysiert einen Ordner mit Audiofiles, und der Walker erstellt eine lokale SQLite-Datenbank mit allen Detections. Wenn Embeddings aktiviert sind, extrahiert der Walker für jede Detection einen 1024-dimensionalen Vektor. Diese Vektoren werden aber nicht mehr in eine HDF5-Datei geschrieben, sondern direkt in einen DiskANN-Index.
+Der Nutzer analysiert einen Ordner oder ein geschachteltes Ordnersystem mit Audiofiles, und der Walker erstellt eine lokale SQLite-Datenbank mit allen Detections und den Embeddings (wenn embeddings aktiviert sind) in jedem Ordner. Wenn Embeddings aktiviert sind, extrahiert der Walker für jede Detection einen 1024-dimensionalen Vektor. Diese Vektoren werden aber nicht mehr in eine HDF5-Datei geschrieben, sondern direkt in einen DiskANN-Index.
 
-Der DiskANN-Index ist eine Ordner-Struktur (daher die `.diskann/` Notation), die mehrere Dateien enthält: Den eigentlichen Vektor-Speicher, die Index-Struktur für schnelle Suchen, und Metadaten. Der Walker fügt jeden Vektor hinzu und bekommt eine vector_id zurück – eine fortlaufende Nummer, die in der SQLite-Datenbank bei der entsprechenden Detection gespeichert wird.
+Der DiskANN-Index ist eine Ordner-Struktur (daher die `.diskann/` Notation), die mehrere Dateien enthält: Den eigentlichen Vektor-Speicher, die Index-Struktur für schnelle Suchen, und Metadaten. Der Walker fügt jeden Vektor hinzu und bekommt eine vector_id zurück – eine fortlaufende Nummer, die in der SQLite-Datenbank bei der entsprechenden Detection als Reference gespeichert wird.
 
-Später, wenn der Nutzer eine globale Datenbank erstellen möchte, ruft er birdnet-global-sync im übergeordneten Ordner auf. Dieses neue Tool scannt rekursiv nach allen lokalen Datenbanken, liest deren Detections und Vektoren, und fügt sie in die globale Datenbank ein. Dabei wird über einen Hash-Mechanismus sichergestellt, dass keine Duplikate entstehen – wenn derselbe Audio-Schnipsel mehrfach analysiert wurde, wird sein Embedding nur einmal in der globalen Datenbank gespeichert.
+Über einen Hash-Mechanismus, der in der zugehörigen SQLite-Datenbank referenziert mitgespeichert wird, ist sichergestellt, dass keine Duplikate in der DiskANN abgelegt werden: Wenn derselbe Audio-Schnipsel tatsächlich mehrfach analysiert wurde, wird sein Embedding nur einmal in der lokalen, wie globalen DiskANN Datenbank gespeichert.
 
 ### 2.3 Deduplizierung über Hash-Werte
 
-Die Deduplizierung funktioniert über einen vector_hash, der für jeden Embedding-Vektor berechnet wird. Dieser Hash ist ein SHA256 über das float32-Array des Vektors. Da Embeddings deterministisch sind (gleiches Audio → gleicher Vektor), haben identische Detections auch identische Hashes.
-
-In der lokalen Datenbank wird dieser Hash für jede Detection gespeichert. Wenn birdnet-global-sync eine Detection importieren will, prüft es zuerst: Existiert dieser Hash schon in der globalen Datenbank? Falls ja, wird die Detection zwar in die globale SQL-Tabelle eingetragen (damit man weiß, dass diese Detection auch in dieser Session vorkam), aber der Vektor wird nicht dupliziert. Die Detection verweist einfach auf die bestehende vector_id.
+Abgesehen davon, dass in den SQL-Datenbanken gespeichert ist, welche Audiofiles bereits analaysiert wurden, da sie ja auch als Backreferenz für die Audioschnipsel der Erkennungen dienen, soll zur Absicherung, in die DiskANN keine Vektoren doppelt einzutragen, ein Hash über die eingetragenen Vektoren in der SQLite gespeichert werden. Die Deduplizierung funktioniert über einen vector_hash, der für jeden Embedding-Vektor berechnet wird. Dieser Hash ist ein SHA256 über das float32-Array des Vektors. Da Embeddings deterministisch sind (gleiches Audio → gleicher Vektor), haben identische Detections auch identische Hashes.
 
 Das ist speichereffizient: Wenn derselbe Vogel-Ruf in zehn verschiedenen Sessions vorkommt, gibt es zehn Detection-Einträge in der globalen SQL-Datenbank, aber nur einen Vektor im DiskANN-Index.
 
@@ -68,15 +76,13 @@ Im aktuellen System gibt es eine Funktion `write_embeddings_to_hdf5()`, die ein 
 
 In der neuen Version wird diese Funktion ersetzt durch `write_embeddings_to_diskann()`, die die Embeddings nicht in eine Datei schreibt, sondern einzeln zum DiskANN-Index hinzufügt. DiskANN arbeitet anders als HDF5: Statt ein großes Array auf einmal zu schreiben, fügt man Vektoren iterativ hinzu. Für jeden Vektor gibt DiskANN eine ID zurück – eine fortlaufende Nummer, beginnend bei 0.
 
-Das bedeutet: Die bestehende Logik mit `start_idx` und kompakter Nummerierung bleibt konzeptionell gleich. Nur statt `hdf5_file[start_idx:end_idx] = embeddings` macht man jetzt eine Schleife: `for embedding in embeddings: vector_id = diskann.add(embedding)`. Die vector_ids sind immer noch 0, 1, 2, 3, ... – nur dass sie jetzt von DiskANN vergeben werden statt von uns berechnet.
+Diese wird in der SQLite-Datenbank nicht nur bei den betreffenden Erkennungen abgespeicht  (als Vorwärts-Referenz), sondern in einer eigenen Tabelle mit dem zu erstellenden Hash des Vektors gespeichert. Diese Tabelle dient der Prüfung, dass der Vektor nicht schon abgespeichert wurde und ist entsprechend vor `write_embeddings_to_diskann()` zu prüfen.
 
 ### 3.2 Erweiterung der SQLite-Schema
 
 Die `detections`-Tabelle in der lokalen Datenbank muss um ein Feld erweitert werden. Aktuell gibt es ein Feld `embedding_idx INTEGER`, das den Index in der HDF5-Datei speichert. Dieses Feld wird umbenannt zu `vector_id INTEGER` – konzeptionell das Gleiche, nur dass es jetzt auf DiskANN verweist statt auf HDF5.
 
-Zusätzlich kommt ein neues Feld `vector_hash TEXT` hinzu. Dieses speichert den SHA256-Hash des Embedding-Vektors. Der Hash wird einmal beim Einfügen berechnet und ist unveränderlich. Er dient ausschließlich der Deduplizierung beim Import in globale Datenbanken.
-
-Die anderen Tabellen (`metadata`, `processing_status`, `analysis_config`, `species_list`) bleiben komplett unverändert. Das ist wichtig für die Rückwärtskompatibilität: Bestehende Tools wie birdnet-play, die diese Tabellen lesen, funktionieren weiterhin ohne Änderungen.
+Eine neue Tabell ist erforderlich, um die ID jedes Vektors mit einem Feld `vector_hash TEXT` zu verbinden, in dem der HA256-Hash des Embedding-Vektors abgelegt wird. Der Hash wird einmal beim Einfügen berechnet und ist unveränderlich. Er dient zur Prüfung, dass neue Vektoren nicht doch schon enthalten sind, aber vor allem der Deduplizierung beim Import in globale Datenbanken.
 
 ### 3.3 Versionierung über db_version
 
@@ -86,60 +92,19 @@ Um zu tracken, welche Datenbank welches Schema hat, wird eine neue Tabelle `db_v
 db_type: "session" oder "global"
 schema_version: "1.0"
 diskann_version: "0.7.0"
-created_at: ISO-Timestamp
 ```
 
-Damit kann jedes Tool, das eine Datenbank öffnet, sofort erkennen: Ist das eine alte HDF5-basierte Datenbank? Dann muss ich anders damit umgehen. Ist das eine neue DiskANN-basierte Session-Datenbank? Dann kann ich direkt arbeiten. Ist das eine globale Datenbank? Dann weiß ich, dass die Struktur anders ist.
+Damit kann jedes Tool, das eine Datenbank öffnet, sofort erkennen: Ist das eine alte Datenbank? Dann muss ich anders damit umgehen. Ist das eine globale Datenbank? Dann weiß ich, dass die Struktur anders ist.
 
-Das ermöglicht auch zukünftige Migrationen: Wenn wir später das Schema ändern, können wir die schema_version hochzählen und automatische Migrations-Scripts schreiben.
+Das ermöglicht zukünftige Migrationen (im Moment noch nicht nötig, da alles noch in Entwicklung): Wenn wir später das Schema ändern, können wir die schema_version hochzählen und automatische Migrations-Scripts schreiben.
 
 ---
 
-## 4. Das neue Tool: birdnet-global-sync
+## 4. Neues Tool oder Erweiterung?
 
-### 4.1 Zweck und Funktionsweise
+Jedes Tool, jede Option, jede zwingend notwendige Zeile Benutzerdokumentation macht die Anwendung schwieriger. Die Funktionalität sollte einfach da sein.
 
-Das birdnet-global-sync Tool ist das Herzstück der neuen Architektur. Es wird vom Nutzer manuell aufgerufen, wenn er eine globale Datenbank erstellen oder aktualisieren möchte. Der Aufruf ist einfach: Der Nutzer navigiert in einen Ordner, der mehrere Unterordner mit lokalen Datenbanken enthält, und ruft `birdnet-global-sync .` auf.
-
-Das Tool macht dann folgendes: Es scannt rekursiv alle Unterordner und sucht nach Dateien namens `birdnet_analysis.db`. Wenn es eine findet, prüft es: Liegt im gleichen Ordner auch ein `birdnet_vectors.diskann/` Ordner? Falls ja, ist das eine lokale Session-Datenbank. Diese wird zur Liste der zu importierenden Quellen hinzugefügt.
-
-Wichtig: Wenn das Tool auf eine `birdnet_global.db` stößt, stoppt es die Rekursion in diesem Zweig. Globale Datenbanken werden nicht importiert – das würde zu endlosen Schleifen und Duplikaten führen. Nur lokale Session-Datenbanken sind Importquellen.
-
-### 4.2 Sync-Logik und Inkrementalität
-
-Nach dem Scannen prüft das Tool: Existiert schon eine globale Datenbank im aktuellen Ordner? Falls nein, wird sie erstellt – eine leere `birdnet_global.db` und ein leerer `birdnet_vectors_global.diskann/` Index.
-
-Falls eine globale Datenbank schon existiert, muss das Tool intelligent vorgehen: Es soll nur neue oder geänderte Detections importieren, nicht alles nochmal. Dazu führt die globale Datenbank eine Tabelle `source_dbs`, die für jede importierte Quell-Datenbank einen Eintrag hat:
-
-```
-source_db: relativer Pfad zur Quell-DB
-last_synced: Timestamp
-num_vectors_imported: Anzahl
-db_checksum: Hash über die Quell-DB
-```
-
-Der db_checksum ist ein Hash über den gesamten Inhalt der Quell-Datenbank (nicht der Vektoren, sondern der SQL-Struktur). Wenn dieser Hash sich nicht geändert hat seit dem letzten Sync, kann diese Quelle übersprungen werden – es gibt nichts Neues zu importieren.
-
-Falls der Hash sich geändert hat, oder die Quelle noch nie importiert wurde, lädt das Tool alle Detections aus dieser Quelle und fügt sie der globalen Datenbank hinzu. Dabei wird für jede Detection geprüft: Existiert ihr vector_hash schon in der globalen Datenbank? Falls ja, wird nur ein neuer Detection-Eintrag mit Verweis auf die bestehende vector_id angelegt. Falls nein, wird auch der Vektor aus dem lokalen DiskANN geladen und dem globalen DiskANN hinzugefügt.
-
-### 4.3 Hierarchie-Bewusstsein
-
-Das System ist so konzipiert, dass mehrere Ebenen von globalen Datenbanken möglich sind. Angenommen, ein Nutzer hat diese Struktur:
-
-```
-alle_projekte/
-├── projekt_2024/
-│   ├── standort_a/
-│   └── standort_b/
-└── projekt_2025/
-    └── standort_c/
-```
-
-Er kann erst in `projekt_2024/` eine globale Datenbank erstellen, die standort_a und standort_b aggregiert. Dann kann er in `alle_projekte/` eine weitere globale Datenbank erstellen. Wenn birdnet-global-sync in `alle_projekte/` läuft, findet es rekursiv die Session-Datenbanken in standort_a, standort_b und standort_c – aber es findet auch die globale Datenbank in `projekt_2024/`.
-
-Hier greift die Stopp-Regel: Wenn das Tool auf `projekt_2024/birdnet_global.db` stößt, rekursiert es nicht weiter in die Unterordner von projekt_2024. Es importiert also standort_c (der noch nicht in einer globalen DB ist), aber nicht standort_a und standort_b (die schon in projekt_2024/birdnet_global.db sind).
-
-Das ist wichtig, damit keine Duplikate entstehen: standort_a wird nur einmal importiert – in projekt_2024/global. Wenn der Nutzer später auch in alle_projekte/global importieren will, könnte er entweder die projekt_2024/global importieren (wir könnten das später als Feature hinzufügen), oder er löscht die projekt_2024/global und lässt alle_projekte/global direkt von den Sessions importieren.
+Für alles an Vereinfachung: Option --do-all -> Das volle Programm ohne weitere Optionen.
 
 ---
 
@@ -147,33 +112,29 @@ Das ist wichtig, damit keine Duplikate entstehen: standort_a wird nur einmal imp
 
 ### 5.1 Lokale Session-Datenbank
 
-Die lokale Datenbank (`birdnet_analysis.db`) bleibt weitgehend wie sie ist. Die zentrale Änderung ist die `detections`-Tabelle. Statt einem Feld `embedding_idx` gibt es jetzt zwei Felder: `vector_id` (die ID im DiskANN-Index) und `vector_hash` (der SHA256-Hash des Vektors).
+Die lokale Datenbank (`birdnet_analysis.db`) bleibt weitgehend wie sie ist. Die zentrale Änderung ist die `detections`-Tabelle. Statt einem Feld `embedding_idx` gibt es jetzt: `vector_id` (die ID im DiskANN-Index)
+
+Eine weite Tabelle führt dann zusammen:
+
+`vector_id` und `vector_hash` (der SHA256-Hash des Vektors).
 
 Die vector_id wird direkt vom DiskANN-Index zurückgegeben, wenn ein Vektor hinzugefügt wird. Sie ist immer eine nicht-negative Ganzzahl, beginnend bei 0, fortlaufend ohne Lücken. Wenn eine Detection keine Embeddings hat (weil --extract-embeddings nicht verwendet wurde), ist vector_id NULL.
 
 Der vector_hash wird einmal beim Einfügen berechnet. Die Berechnung erfolgt über: `hashlib.sha256(embedding.tobytes()).hexdigest()`. Das gibt einen 64-Zeichen-String zurück. Dieser Hash ist unveränderlich und wird nie neu berechnet – er ist quasi der Fingerabdruck des Vektors.
 
 Die neue `db_version`-Tabelle enthält Metadaten über die Datenbank selbst. Sie hat nur zwei Spalten: `key` und `value`, beide Text. Wichtige Einträge sind:
+
 - `db_type`: "session" (markiert diese als lokale Datenbank)
 - `schema_version`: "1.0" (Version des Schema)
 - `diskann_version`: Die Version der DiskANN-Library, mit der der Index erstellt wurde
-- `created_at`: ISO-Timestamp der Erstellung
 
 ### 5.2 Globale Aggregations-Datenbank
 
-Die globale Datenbank (`birdnet_global.db`) hat eine andere Struktur. Ihre `detections`-Tabelle enthält nicht nur die Detection-Daten selbst, sondern auch Informationen über die Herkunft:
+Die globale Datenbank (`birdnet_global.db`) hat eine ähnliche Struktur, wie die lokalen Datenbanken.
 
-Jede Detection hat ein Feld `source_db`, das den relativen Pfad zur Quell-Datenbank speichert (z.B. "standort_a_2024/birdnet_analysis.db"). Dadurch kann man später nachvollziehen: Diese Detection kam ursprünglich aus standort_a.
+Ihre `detections`-Tabelle enthält bei den Detection-Daten den realtiven Pfad zum Audio statt nur den Dateinamen selbst. Und die Verweise zum Vektor in der DiskANN enthalten die zur globalen, auf gleicher Ebene befindlichen DiskANN-Datenhbank. Das heißt, bei der Übernahme der Daten der lokalen DBs wird auch der Vektor von dort in die globale DB übernommen und dessen ID zusammen mit dem Hash in der globalen SQLite abgespeichert. Nicht der Verweis zur lokalen Quelldatenbank. Durch den Wert des Hash wird trotzdem erkannt, ob ein Vektor vielleicht doch doppeklt eingelesen würde.
 
-Zusätzlich gibt es ein Feld `source_detection_id` – die ID, die diese Detection in ihrer Quell-Datenbank hatte. Das ermöglicht eine vollständige Rückverfolgung: Wenn ich in der globalen Datenbank eine interessante Detection finde, kann ich über source_db und source_detection_id zur Original-Detection in der lokalen Datenbank navigieren.
-
-Die Felder `vector_id` und `vector_hash` haben die gleiche Bedeutung wie in der lokalen Datenbank – nur dass vector_id hier auf den globalen DiskANN-Index verweist. Wichtig: Der vector_hash ist identisch zum Hash in der Quell-Datenbank. Das ist der Schlüssel zur Deduplizierung.
-
-Die `source_dbs`-Tabelle ist neu und dient dem Sync-Tracking. Für jede Quell-Datenbank, die jemals importiert wurde, gibt es einen Eintrag. Das `db_checksum`-Feld speichert einen Hash über den gesamten Inhalt der Quell-Datenbank (genauer: über alle Detection-IDs, vector_hashes und Timestamps). Wenn dieser Hash sich nicht ändert, hat sich nichts Relevantes geändert, und diese Quelle kann beim nächsten Sync übersprungen werden.
-
-Die `db_version`-Tabelle ist analog zur lokalen Datenbank, nur dass `db_type` hier "global" ist.
-
----
+Nach dem Einlesevorgang ist die gloable SQLite und DiskANN-Datenbank über alle untergeordneten Audiofiles im Bilde. Für eine globale Analyse werden die untergeordneten Datenbanken gar nicht benötigt. Das schafft einerseits Redundanz und doppelte Daten, wenn man Datenbanken lokal und global erstellt. Aber die globalen Datenbanken sind nicht davon abhängig, ob der NButzer auch alle seine lokalen Datenbanken richtig gepflegt hat: Starte ich den birdnet-walker global so erzeugt oder erweitert er mir auch die lokalen Datenbanken, füllt aber unabhängig davon immer auch die globale Datenbank.
 
 ## 6. Technische Details zu DiskANN
 
@@ -181,7 +142,7 @@ Die `db_version`-Tabelle ist analog zur lokalen Datenbank, nur dass `db_type` hi
 
 Es gibt viele Vektordatenbank-Technologien: FAISS, Annoy, Milvus, Qdrant, ChromaDB. Die Wahl von DiskANN basiert auf mehreren Überlegungen:
 
-DiskANN ist speziell für disk-basierte Speicherung optimiert. Das ist wichtig, weil biologische Projekte oft auf Servern mit begrenztem RAM, aber viel SSD-Speicher laufen. DiskANN kann Milliarden von Vektoren verwalten, ohne sie alle in den RAM laden zu müssen. Der Index ist so strukturiert, dass nur die relevanten Teile geladen werden, wenn eine Suche durchgeführt wird.
+DiskANN ist speziell für disk-basierte Speicherung optimiert. Das ist wichtig, weil biologische Projekte oft auf Servern mit begrenztem RAM, aber viel SSD/HDD-Speicher laufen. DiskANN kann Milliarden von Vektoren verwalten, ohne sie alle in den RAM laden zu müssen. Der Index ist so strukturiert, dass nur die relevanten Teile geladen werden, wenn eine Suche durchgeführt wird.
 
 DiskANN ist Open Source und hat Python-Bindings über PyPI. Die Integration ist also straightforward – keine komplizierte Installation oder separate Server-Prozesse. Ein einfaches `pip install diskannpy` reicht.
 
@@ -201,21 +162,19 @@ Für unseren Anwendungsfall bedeutet das: Wenn birdnet-walker einen neuen Ordner
 
 Ein großer Vorteil von DiskANN ist die Persistenz: Der Index liegt komplett auf Disk. Wenn das Programm beendet wird und später neu gestartet wird, kann der Index einfach wieder geöffnet werden – alle Daten sind noch da.
 
-Das ist wichtig für die Resume-Logik von birdnet-walker: Wenn der Walker während der Analyse abstürzt, können beim Neustart die bereits geschriebenen Vektoren im DiskANN-Index verbleiben. Der Walker muss nur in der SQLite-Datenbank prüfen, welche Files schon vollständig verarbeitet wurden, und kann dann dort weitermachen.
+Das ist wichtig für die Resume-Logik von birdnet-walker: Wenn der Walker während der Analyse abstürzt, können beim Neustart die bereits geschriebenen Vektoren im DiskANN-Index verbleiben. Der Walker muss nur in der SQLite-Datenbank prüfen, welche Files schon vollständig verarbeitet wurden, und kann dann dort weitermachen. Im schlimmsten Fall sagt der Hash, dass der Vektor schon indiziert wurde.
 
-Es gibt allerdings eine Besonderheit: DiskANN unterstützt kein echtes "Löschen" von Vektoren. Wenn ein Vektor einmal hinzugefügt wurde, kann er nicht mehr entfernt werden. Man kann nur den gesamten Index neu aufbauen. Für unseren Anwendungsfall ist das kein Problem: Wir löschen nie Detections. Wenn eine Detection als fehlerhaft markiert wird, bleibt sie in der Datenbank (mit einer entsprechenden Markierung), aber der Vektor bleibt ebenfalls im Index.
-
----
+Es gibt allerdings eine Besonderheit: DiskANN unterstützt kein echtes "Löschen" von Vektoren. Wenn ein Vektor einmal hinzugefügt wurde, kann er nicht mehr entfernt werden. Man kann nur den gesamten Index neu aufbauen. Für unseren Anwendungsfall ist das kein Problem: Wir löschen nie Detections. Wenn eine Detection als fehlerhaft markiert wird, bleibt sie in der Datenbank (mit einer entsprechenden Markierung), aber der Vektor bleibt ebenfalls im Index. (Diese Negativ-Markierung ist noch nicht implementiert!)
 
 ## 7. Workflow für den Nutzer
 
 ### 7.1 Neue Aufnahmen analysieren (wie bisher)
 
-Der grundlegende Workflow ändert sich für den Nutzer fast gar nicht. Wie bisher ruft er `birdnet-walker /pfad/zu/ordner --extract-embeddings` auf. Das Programm läuft durch, analysiert alle WAV-Files, und erstellt eine Datenbank.
+Der grundlegende Workflow ändert sich für den Nutzer katisch nicht gegenüber der bisherigen Form. Wie bisher ruft er `birdnet-walker /pfad/zu/ordner (und einige Optionenhj)` auf. Das Programm läuft durch, analysiert alle WAV-Files, und erstellt/erweitert eine Datenbank lokal und, wenn gewünscht bei rekursiver Arbeit, auch die globale Datenbank.
 
-Der einzige sichtbare Unterschied: Statt einer `birdnet_embeddings.h5` Datei gibt es jetzt einen `birdnet_vectors.diskann/` Ordner. Intern passiert natürlich viel mehr, aber für den Nutzer ist das transparent.
+Auch die Resume-Funktion funktioniert wie bisher: Wenn der Walker abbricht und neu gestartet wird, analysiert er nur die Files, die noch nicht den Status "completed" in der `processing_status`-Tabelle haben. Zusätzlich sichert der Hash die Indizierung der Embeddings ab.
 
-Auch die Resume-Funktion funktioniert wie bisher: Wenn der Walker abbricht und neu gestartet wird, analysiert er nur die Files, die noch nicht den Status "completed" in der `processing_status`-Tabelle haben.
+# AB HIER WEITER BEARBEITEN
 
 ### 7.2 Globale Datenbank erstellen (neu)
 
@@ -254,6 +213,7 @@ Es wird Nutzer geben, die bereits mit dem aktuellen System gearbeitet und HDF5-b
 Die einfachste: Alte Datenbanken bleiben funktional für Read-Only-Zugriff. Tools wie birdnet-play können weiterhin alte Datenbanken öffnen und die Embeddings aus HDF5 lesen. Sie müssen nur in der Lage sein zu erkennen: Hat diese Datenbank eine `db_version`-Tabelle? Falls nein, ist es eine alte Datenbank, und Embeddings liegen in HDF5.
 
 Für Nutzer, die ihre alten Datenbanken in das neue Format konvertieren wollen, könnte ein Migrations-Script entwickelt werden: `birdnet-migrate-to-diskann /pfad/zu/alter/db`. Dieses Script würde:
+
 1. Die HDF5-Datei öffnen und alle Embeddings laden
 2. Einen neuen DiskANN-Index erstellen
 3. Alle Embeddings in DiskANN schreiben (dabei die IDs notieren)
