@@ -10,7 +10,7 @@
 
 ### 1.1 Die zentrale Idee
 
-Das bestehende BirdNET-Walker-System speichert derzeit für jeden Aufnahme-Ordner eine separate HDF5-Datei mit Embedding-Vektoren. Diese Embeddings sind 1024-dimensionale Feature-Vektoren, die aus dem BirdNET-Modell extrahiert werden und die akustischen Eigenschaften jeder Detection repräsentieren. Das funktioniert gut für die lokale Speicherung zugehörig zu den Audiofiles und Detektionen des Verzeichnisses auf der gleichen Ebene. Aber es gibt ein fundamentales Problem: Die Embeddings sind über viele einzelne Dateien verstreut, wenn es mehrere derartiger Ordner gibt, in denen man die Audiofiles und Detektionen sortiert. Es gibt dann keine Möglichkeit, schnell nach ähnlichen Detections global über alle Aufnahme-Sessions hinweg zu suchen. 
+Das bestehende BirdNET-Walker-System speichert derzeit für jeden Aufnahme-Ordner eine separate HDF5-Datei mit Embedding-Vektoren. Diese Embeddings sind 1024-dimensionale Feature-Vektoren, die aus dem BirdNET-Modell extrahiert werden und die akustischen Eigenschaften jeder Detection repräsentieren. Das funktioniert gut für die lokale Speicherung zugehörig zu den Audiofiles und Detektionen des Verzeichnisses auf der gleichen Ebene. Aber es gibt ein fundamentales Problem: Die Embeddings sind über viele einzelne Dateien verstreut, wenn es mehrere derartiger Ordner gibt, in denen man die Audiofiles und Detektionen sortiert. Es gibt dann keine Möglichkeit, schnell nach ähnlichen Detections global über alle Aufnahme-Sessions hinweg zu suchen.
 
 Die neue Architektur führt ein hierarchisches System ein, bei dem Vektordatenbanken auf verschiedenen Ebenen existieren können. Eine lokale Vektordatenbank liegt direkt bei den Audiofiles und speichert alle Embeddings dieser Session. Übergeordnete Ordner können globale Vektordatenbanken enthalten, die automatisch alle Embeddings aus untergeordneten Sessions aggregieren. Auch die Erkennungen werden entsprechend globaler zusammengeführt.
 
@@ -170,77 +170,9 @@ Es gibt allerdings eine Besonderheit: DiskANN unterstützt kein echtes "Löschen
 
 ### 7.1 Neue Aufnahmen analysieren (wie bisher)
 
-Der grundlegende Workflow ändert sich für den Nutzer katisch nicht gegenüber der bisherigen Form. Wie bisher ruft er `birdnet-walker /pfad/zu/ordner (und einige Optionenhj)` auf. Das Programm läuft durch, analysiert alle WAV-Files, und erstellt/erweitert eine Datenbank lokal und, wenn gewünscht bei rekursiver Arbeit, auch die globale Datenbank.
+Der grundlegende Workflow ändert sich für den Nutzer katisch nicht gegenüber der bisherigen Form. Wie bisher ruft er `birdnet-walker /pfad/zu/ordner (und einige Optionen)` auf. Das Programm läuft durch, analysiert alle WAV-Files, und erstellt/erweitert eine Datenbank lokal und bei recursiver Arbeit wenn gewünscht, auch die globale Datenbank.
 
 Auch die Resume-Funktion funktioniert wie bisher: Wenn der Walker abbricht und neu gestartet wird, analysiert er nur die Files, die noch nicht den Status "completed" in der `processing_status`-Tabelle haben. Zusätzlich sichert der Hash die Indizierung der Embeddings ab.
-
-# AB HIER WEITER BEARBEITEN
-
-### 7.2 Globale Datenbank erstellen (neu)
-
-Wenn der Nutzer mehrere Sessions analysiert hat und diese nun aggregieren möchte, navigiert er in den übergeordneten Ordner und ruft das neue Tool auf:
-
-```bash
-cd /pfad/zu/projekt_2024
-birdnet-global-sync .
-```
-
-Das Tool scannt, findet alle Session-Datenbanken, und erstellt eine `birdnet_global.db` und `birdnet_vectors_global.diskann/` im aktuellen Ordner. Der Nutzer sieht einen Progress-Balken mit der Anzahl importierter Sessions und Detections.
-
-Das Schöne: Dieser Befehl ist idempotent. Wenn der Nutzer ihn später nochmal aufruft (z.B. weil neue Sessions hinzugekommen sind), importiert das Tool nur die neuen Daten. Bereits importierte Sessions werden übersprungen (wenn sich ihr Checksum nicht geändert hat).
-
-### 7.3 Cross-Site-Analysen durchführen (zukünftig)
-
-Die globale Datenbank ist die Grundlage für zukünftige Analyse-Tools. Ein Nutzer könnte beispielsweise ein Python-Script schreiben (oder wir entwickeln später ein Tool dafür), das folgendes macht:
-
-1. Lade alle Detections einer bestimmten Art aus der globalen Datenbank
-2. Lade die zugehörigen Vektoren aus dem globalen DiskANN-Index
-3. Führe ein Clustering auf diesen Vektoren durch (z.B. DBSCAN)
-4. Zeige dem Nutzer: "Ich habe 5 Cluster gefunden. Cluster 3 ist klein und hat niedrige Confidence – möglicherweise Fehlklassifikationen"
-
-Oder ein anderes Szenario: Der Nutzer hat in Session A einen verdächtigen Cluster gefunden. Er kann nun eine Nearest-Neighbor-Suche in der globalen Datenbank durchführen: "Finde alle Detections, deren Vektoren dem Durchschnittsvektor dieses Clusters ähnlich sind". Das System findet dann ähnliche Detections in allen anderen Sessions, die der Nutzer sich dann anhören und validieren kann.
-
-Das ist die Vision: Die globale Datenbank ist nicht das Endziel, sondern die Infrastruktur, die solche übergreifenden Analysen erst ermöglicht.
-
----
-
-## 8. Migration bestehender Datenbanken
-
-### 8.1 Umgang mit alten HDF5-basierten Datenbanken
-
-Es wird Nutzer geben, die bereits mit dem aktuellen System gearbeitet und HDF5-basierte Datenbanken erstellt haben. Diese sollen natürlich nicht einfach unbrauchbar werden. Es gibt mehrere Strategien:
-
-Die einfachste: Alte Datenbanken bleiben funktional für Read-Only-Zugriff. Tools wie birdnet-play können weiterhin alte Datenbanken öffnen und die Embeddings aus HDF5 lesen. Sie müssen nur in der Lage sein zu erkennen: Hat diese Datenbank eine `db_version`-Tabelle? Falls nein, ist es eine alte Datenbank, und Embeddings liegen in HDF5.
-
-Für Nutzer, die ihre alten Datenbanken in das neue Format konvertieren wollen, könnte ein Migrations-Script entwickelt werden: `birdnet-migrate-to-diskann /pfad/zu/alter/db`. Dieses Script würde:
-
-1. Die HDF5-Datei öffnen und alle Embeddings laden
-2. Einen neuen DiskANN-Index erstellen
-3. Alle Embeddings in DiskANN schreiben (dabei die IDs notieren)
-4. Die `detections`-Tabelle updaten: `embedding_idx` umbennen zu `vector_id`, `vector_hash` berechnen und hinzufügen
-5. Die `db_version`-Tabelle erstellen
-6. Optional: Die alte HDF5-Datei in ein Backup umbenennen
-
-Das wäre ein einmaliger Prozess pro Datenbank. Danach ist die Datenbank vollständig kompatibel mit dem neuen System.
-
-### 8.2 Abwärtskompatibilität in birdnet-play
-
-Das birdnet-play Tool (und andere Lese-Tools) sollten so erweitert werden, dass sie beide Formate verstehen. Die Erkennungs-Logik könnte so aussehen:
-
-Beim Öffnen einer Datenbank: Prüfe, ob es eine `db_version`-Tabelle gibt. Falls ja, lies den `db_type` und `schema_version`. Falls `db_type == "session"` und `schema_version >= "1.0"`, nutze DiskANN. Falls die Tabelle nicht existiert, nutze HDF5.
-
-In der Praxis würde das bedeuten: In allen Funktionen, die Embeddings laden, gibt es zwei Code-Pfade:
-
-```python
-if db_has_diskann(db_path):
-    embedding = load_from_diskann(db_path, vector_id)
-else:
-    embedding = load_from_hdf5(db_path, embedding_idx)
-```
-
-Das ist etwas redundant, aber es ermöglicht einen sanften Übergang ohne Breaking Changes.
-
----
 
 ## 9. Offene Fragen und Entscheidungen
 
@@ -248,7 +180,7 @@ Das ist etwas redundant, aber es ermöglicht einen sanften Übergang ohne Breaki
 
 Es gibt diverse Parameter beim Erstellen eines DiskANN-Index: Anzahl der Nachbarn im Graph, Distanz-Metrik, Konsolidierungs-Intervalle. Wir müssen sinnvolle Defaults wählen, die für typische biologische Projekte (Größenordnung: 10.000 bis 1.000.000 Detections pro Session) gut funktionieren.
 
-Die Distanz-Metrik sollte Cosine-Similarity sein, da wir an der Richtung der Vektoren interessiert sind, nicht an ihrer absoluten Magnitude. Das ist bei Embeddings aus neuronalen Netzen üblich.
+Die Distanz-Metrik sollte Cosine-Similarity sein, da wir an der Richtung der Vektoren interessiert sind, nicht an ihrer absoluten Magnitude. Denn das ist bei Embeddings aus neuronalen Netzen üblich.
 
 Die Anzahl der Nachbarn im Index-Graph beeinflusst den Trade-off zwischen Suchgeschwindigkeit und Genauigkeit. Ein höherer Wert bedeutet langsameren Aufbau, aber präzisere Suchen. Für unseren Anwendungsfall (wo Recall wichtiger ist als absolute Geschwindigkeit) sollten wir eher großzügig dimensionieren.
 
@@ -256,7 +188,7 @@ Konkrete Werte müssen experimentell ermittelt werden – idealerweise mit reale
 
 ### 9.2 Performance-Überlegungen
 
-Ein DiskANN-Index ist schnell für Suchen, aber langsamer beim Aufbau als HDF5. Das Schreiben von 500 Embeddings in HDF5 dauert Millisekunden. Das Hinzufügen von 500 Vektoren zu DiskANN plus anschließende Konsolidierung kann mehrere Sekunden dauern.
+Ein DiskANN-Index ist schnell für Suchen, aber langsamer beim Aufbau. Das Schreiben von 500 Embeddings in HDF5 dauert Millisekunden. Das Hinzufügen von 500 Vektoren zu DiskANN plus anschließende Konsolidierung kann mehrere Sekunden dauern.
 
 Für den normalen Workflow (ein Ordner analysieren, dann fertig) ist das unkritisch – ein paar Sekunden zusätzliche Wartezeit am Ende der Analyse fallen nicht ins Gewicht. Aber für sehr große Batch-Jobs (hunderte Ordner) könnte sich das summieren.
 
@@ -270,7 +202,7 @@ Ein möglicher Ansatz: Backup des Index vor jeder größeren Operation. Wenn bir
 
 Alternativ: Der Index ist als "expendable" zu betrachten – er kann jederzeit aus den Daten in der SQLite-Datenbank neu aufgebaut werden. Die SQLite-Datenbank ist die "Single Source of Truth", und der DiskANN-Index ist nur ein beschleunigender Cache. Wenn der Index korrupt ist, löschen wir ihn und bauen ihn neu aus der SQLite-Datenbank.
 
-Das würde bedeuten: In der SQLite-Datenbank müssen die Embeddings selbst auch gespeichert werden, nicht nur die vector_ids. Oder wir speichern die Embeddings in einem separaten, robusten Format (z.B. als BLOB in einer weiteren SQLite-Tabelle), und der DiskANN-Index ist rein sekundär.
+Das würde jedoch bedeuten: In der SQLite-Datenbank müssen die Embeddings selbst auch gespeichert werden, nicht nur die vector_ids. Oder wir speichern die Embeddings in einem separaten, robusten Format (z.B. als BLOB in einer weiteren SQLite-Tabelle), und der DiskANN-Index ist rein sekundär. Das bedeutet: Das was wir jetzt in HDF5 schreiben, müsste als eigene Tabelle in SQLite abgelegt werden. DiskANN wäre dann top-of zur SQLite-DB.
 
 ### 9.4 Umgang mit sehr großen Datenmengen
 
@@ -290,100 +222,17 @@ Eine mögliche Optimierung für Experten-Nutzer: Sharding. Die globale Datenbank
 
 Die Umstellung sollte nicht in einem großen Bang passieren, sondern schrittweise. Ein möglicher Fahrplan:
 
-**Phase 1: Lokale DiskANN-Unterstützung in birdnet-walker**
+**Phase 1: Lokale Aufnahme der Embedding-Vektoren zur SQLite-DB in birdnet-walker zusammen mit den Erkennungen und der Mitschrift, welche Audio-Files verarbeitet wurden**
 
-Zunächst wird nur der birdnet-walker angepasst. Er schreibt Embeddings in DiskANN statt HDF5, und die `detections`-Tabelle bekommt `vector_id` und `vector_hash`. Die `db_version`-Tabelle wird eingeführt. Alte HDF5-Unterstützung bleibt parallel erhalten (als Fallback).
+Statt in HDF abzulegen, wird für4 die Embedding-Vektoren eine Datenbanktabelle in SQLite angelegt. Sie nimmt den Vektor und den sofort dazu erstellten Hash auf. Eine eindeutige ID wird dann den Erkennungen zugefügt, die für den gleichen Zeitabschnitt (BirdNET: 3s-Stück) erkannt wurden.
 
-Nutzer können das neue System ausprobieren. Es gibt noch keine globalen Datenbanken, aber die Grundlage ist gelegt.
+**Phase 2: Lokale DiskANN-Unterstützung in birdnet-walker**
 
-**Phase 2: birdnet-play Kompatibilität**
+Jetzt werden die Embeddings zusätzlich gleich noch in DiskANN importiert und back-referenziert in die SQLite-DB. Die `db_version`-Tabelle wird in SQLite eingeführt, um die Metainformationen zur DiskANN zu speichern.
 
-Das birdnet-play Tool wird erweitert, um beide Formate zu lesen. Nutzer können sowohl alte HDF5- als auch neue DiskANN-basierte Datenbanken öffnen und durchsuchen. Die Funktionalität bleibt identisch – es ändert sich nur das Backend.
+**Phase 3: Globalität**
 
-**Phase 3: birdnet-global-sync entwickeln**
+Jetzt bauen wir das Globale ein: Zuerst wird geprüft, ob in der rekursiven Bearbeitung die Ordnerlokale Datenbankerstellung funktioniert. Dann wird die Funktionalität der globalen Datenbanken integriert. Die Position ist dafür immer der Startpunkt der recursiven Arbeit. Das muss der Nutzer gewähren. Wichtig ist, dass jetzt zweigleisig analysiert wird:
 
-Das neue Tool wird entwickelt und getestet. Zunächst in einer Alpha-Version für experimentierfreudige Nutzer. Feedback wird gesammelt: Ist die Sync-Logik intuitiv? Sind die Performance-Charakteristiken akzeptabel?
-
-**Phase 4: Analyse-Tools für globale Datenbanken**
-
-Sobald globale Datenbanken stabil sind, können erste Analyse-Tools entwickelt werden. Das könnte ein neues birdnet-play Page sein: "Cross-Site Clustering". Oder ein separates Command-Line-Tool für Power-User.
-
-**Phase 5: HDF5 deprecaten**
-
-Wenn die DiskANN-Implementierung ausgereift ist und keine kritischen Bugs mehr auftreten, kann HDF5 offiziell als "legacy" markiert werden. Neue Nutzer werden nur noch DiskANN verwenden. Alte Nutzer werden ermutigt zu migrieren, aber es bleibt funktional.
-
-### 10.2 Testing-Strategie
-
-Jede Phase braucht umfassende Tests:
-
-**Unit-Tests** für alle neuen Funktionen: DiskANN-Schreiben, Vector-Hash-Berechnung, Deduplizierungs-Logik, Hierarchie-Scanning. Diese Tests sollten mit kleinen, synthetischen Datenbanken arbeiten.
-
-**Integration-Tests** mit realen Daten: Ein Testdatensatz mit echten AudioMoth-Aufnahmen (z.B. 100 Files à 6 Stunden) wird durch den kompletten Workflow geschickt: birdnet-walker Analyse, globale Datenbank erstellen, Suchen durchführen. Die Ergebnisse werden gegen bekannte Ground-Truth validiert.
-
-**Performance-Tests**: Wie lange dauert die Analyse von 1000 Files? Wie lange das Erstellen einer globalen Datenbank mit 500.000 Detections? Wie schnell sind Nearest-Neighbor-Suchen über 1 Million Vektoren? Diese Metriken müssen dokumentiert werden, damit Nutzer realistische Erwartungen haben.
-
-**Stress-Tests**: Was passiert bei extremen Szenarien? 10 Millionen Detections? 1000 Session-Datenbanken gleichzeitig importieren? Ein Ordner mit 100 GB an Audiodaten? Das System sollte nicht abstürzen, sondern entweder erfolgreich durchlaufen oder mit klaren Fehlermeldungen abbrechen.
-
-### 10.3 Dokumentation und Nutzer-Kommunikation
-
-Die Änderungen müssen klar dokumentiert werden:
-
-Ein **Migration Guide** erklärt Nutzern, die bereits HDF5-Datenbanken haben, wie sie migrieren können. Schritt-für-Schritt-Anleitung mit Screenshots.
-
-Ein **Tutorial für birdnet-global-sync**: Wie erstellt man seine erste globale Datenbank? Welche Ordnerstruktur macht Sinn? Wie interpretiert man die Ausgabe?
-
-Ein **Technisches Deep-Dive-Dokument** (dieses hier) für fortgeschrittene Nutzer und zukünftige Entwickler, die das System verstehen und erweitern wollen.
-
-**Changelog-Einträge** in der Haupt-Dokumentation: Version 0.4.0 bringt hierarchische Vektordatenbanken. Was ist neu? Was ändert sich? Was bleibt gleich?
-
----
-
-## 11. Zusammenfassung und Ausblick
-
-### 11.1 Kernpunkte der neuen Architektur
-
-Das neue System führt ein hierarchisches Modell ein: Lokale Session-Datenbanken bleiben das Fundament – erstellt vom birdnet-walker wie bisher. Aber jetzt können diese Sessions in übergeordneten Ordnern zu globalen Datenbanken aggregiert werden. Diese Aggregation ist dedupliziert, effizient, und inkrementell.
-
-Der Wechsel von HDF5 zu DiskANN bringt Nearest-Neighbor-Suche auf Milliarden von Vektoren in den Sekundenbereich. Das ermöglicht vollkommen neue Analysen: Cross-Site Pattern Recognition, False-Positive-Detection über alle Sessions, Ruftyp-Klassifikation über verschiedene Standorte hinweg.
-
-Die Architektur ist so entworfen, dass sie sich natürlich an die Arbeitsweise von Biologen anpasst: Ordner entsprechen logischen Einheiten (Standort, Jahr, Projekt). Das System nutzt diese Struktur, ohne sie zu erzwingen. Ein Nutzer kann weiterhin mit einzelnen Ordnern arbeiten, wenn er will. Globale Datenbanken sind opt-in, nicht obligatorisch.
-
-### 11.2 Was das für den wissenschaftlichen Workflow bedeutet
-
-Für einen Biologen ändert sich der grundlegende Workflow kaum: Aufnahmen machen, mit birdnet-walker analysieren, mit birdnet-play durchsehen. Alles wie bisher.
-
-Aber es kommen neue Möglichkeiten hinzu: Nach der Analyse mehrerer Sessions kann er mit einem einzigen Befehl eine globale Datenbank erstellen. Diese ist nicht nur eine Zusammenfassung der Daten, sondern eine durchsuchbare Wissensbasis über alle seine Aufnahmen.
-
-Ein konkretes Szenario: Ein Biologe untersucht Kohlmeisen-Populationen an 20 Standorten über 3 Jahre. Das sind 60 Session-Datenbanken. Mit dem neuen System kann er:
-
-1. Eine globale Datenbank erstellen, die alle 60 Sessions aggregiert
-2. Alle Kohlmeisen-Detections aus dieser Datenbank laden (möglicherweise 100.000 Detections)
-3. Die zugehörigen Embeddings clustern und visualisieren
-4. Entdecken: Es gibt einen Cluster mit 500 Detections, die BirdNET als Kohlmeise klassifiziert, aber akustisch sehr unterschiedlich sind
-5. Diese 500 Detections anhören und feststellen: Das sind tatsächlich Blaumeisen, die BirdNET falsch zugeordnet hat
-6. Alle 500 Detections in der globalen Datenbank korrigieren
-7. Die Korrektur propagiert in die lokalen Datenbanken (via einem noch zu entwickelnden Tool)
-
-Das ist systematische Qualitätssicherung auf einer Ebene, die mit dem alten System praktisch unmöglich war.
-
-### 11.3 Zukünftige Erweiterungen
-
-Die hierarchischen Vektordatenbanken sind eine Plattform für viele weitere Features:
-
-**Automatische Anomalie-Detection**: Ein Tool, das automatisch alle Detections mit ungewöhnlichen Embeddings identifiziert. "Diese 50 Detections passen nicht zu ihren Art-Clustern – bitte manuell prüfen."
-
-**Ruftyp-Bibliothek**: Nutzer können annotierte Cluster teilen. "Dieser Cluster sind Kohlmeisen-Bettelrufe von Jungvögeln." Diese Annotationen werden in einer Community-Datenbank gesammelt. Neue Nutzer können dann ihre Daten gegen diese Bibliothek matchen: "Du hast einen Cluster, der bekannten Bettelrufen ähnelt."
-
-**Multi-Taxa-Erweiterung**: Das Konzept funktioniert nicht nur für Vögel. Fledermäuse (mit BatDetect), Amphibien, Heuschrecken – jedes akustisch erfassbare Taxon könnte das gleiche System nutzen. Die Vektordatenbanken sind unabhängig vom Modell, das die Embeddings erzeugt.
-
-**Echtzeit-Monitoring**: Mit entsprechender Hardware könnte das System im Feld laufen. Neue Aufnahmen werden sofort analysiert, Embeddings werden in die lokale Datenbank geschrieben. Wenn eine Detection einer bekannten Anomalie-Signatur ähnelt, wird eine Warnung gesendet: "Mögliche seltene Art entdeckt, Position X."
-
-### 11.4 Schlussbemerkung
-
-Diese Architektur ist ambitioniert, aber pragmatisch. Sie baut auf dem auf, was bereits funktioniert (birdnet-walker, SQLite, BirdNET), und erweitert es um eine Dimension, die in der biologischen Praxis oft fehlt: die Fähigkeit, systematisch über viele Datensätze hinweg zu denken.
-
-Die Implementierung wird Zeit brauchen. Aber das Ergebnis – ein System, das Biologen hilft, aus ihren Daten nicht nur Listen von Detections, sondern echtes Wissen zu extrahieren – ist den Aufwand wert.
-
----
-
-**Ende des Konzeptdokuments**
+* auf Ordner-Niveau, ob neue Audiodateien zu erkennen und indizieren sind
+* auf Global-Niveau, dass diese Analysen global zugefügt werden und: ob weitere, bisher nur auf Ordnerebene erstellte Analyseergebnisse und Vektoren in die globale Datenbanken zuzufügen sind.
