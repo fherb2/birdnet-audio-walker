@@ -1,0 +1,138 @@
+<mxfile host="65bd71144e">
+    <diagram name="Analyse-Abfrage" id="analyse">
+        <mxGraphModel dx="954" dy="673" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="1000" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="query1" value="🔍 Analyse-Query" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;fontSize=14;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="40" width="260" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="query2" value="Finde ähnliche Vektoren&#xa;zu Referenz-Embedding" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" parent="1" vertex="1">
+                    <mxGeometry x="240" y="55" width="260" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="diskann1" value="💾 DiskANN: Nearest Neighbor" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=40;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;fillColor=#ffe6cc;strokeColor=#d79b00;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="160" width="260" height="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="diskann2" value="search(query_vector, k=10)" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontStyle=2;" parent="diskann1" vertex="1">
+                    <mxGeometry y="40" width="260" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="diskann3" value="Ergebnis:&#xa;vector_id: 0, 3, 7, 12, 15, ..." style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontStyle=1;" parent="diskann1" vertex="1">
+                    <mxGeometry y="70" width="260" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="step1_1" value="Schritt 1: Embeddings laden" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=40;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;fillColor=#d5e8d4;strokeColor=#82b366;" parent="1" vertex="1">
+                    <mxGeometry x="380" y="160" width="320" height="120" as="geometry"/>
+                </mxCell>
+                <mxCell id="step1_2" value="SELECT * FROM embeddings&#xa;WHERE vector_id IN (0, 3, 7, 12, ...)" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontFamily=Courier New;" parent="step1_1" vertex="1">
+                    <mxGeometry y="40" width="320" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="step1_3" value="→ Hash, BLOB für jeden Vektor" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontStyle=1;" parent="step1_1" vertex="1">
+                    <mxGeometry y="80" width="320" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="step2_1" value="Schritt 2: Detections finden" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=40;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;fillColor=#d5e8d4;strokeColor=#82b366;" parent="1" vertex="1">
+                    <mxGeometry x="380" y="320" width="320" height="220" as="geometry"/>
+                </mxCell>
+                <mxCell id="step2_2" value="SELECT * FROM detections&#xa;WHERE vector_id IN (0, 3, 7, 12, ...)" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontFamily=Courier New;" parent="step2_1" vertex="1">
+                    <mxGeometry y="40" width="320" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="step2_3" value="" style="line;strokeWidth=1;fillColor=none;align=left;verticalAlign=middle;spacingTop=-1;spacingLeft=3;spacingRight=3;rotatable=0;labelPosition=right;points=[];portConstraint=eastwest;" parent="step2_1" vertex="1">
+                    <mxGeometry y="80" width="320" height="8" as="geometry"/>
+                </mxCell>
+                <mxCell id="step2_4" value="Ergebnis 1:&#xa;  audio_path: standort_a/file1.WAV&#xa;  species: Kohlmeise&#xa;  time: 08:32:21 - 08:32:24&#xa;  vector_id: 0" style="text;strokeColor=none;fillColor=#e1d5e7;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontFamily=Courier New;fontSize=10;" parent="step2_1" vertex="1">
+                    <mxGeometry y="88" width="320" height="62" as="geometry"/>
+                </mxCell>
+                <mxCell id="step2_5" value="Ergebnis 2:&#xa;  audio_path: standort_b/file5.WAV&#xa;  species: Blaumeise&#xa;  time: 14:15:30 - 14:15:33&#xa;  vector_id: 3" style="text;strokeColor=none;fillColor=#e1d5e7;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontFamily=Courier New;fontSize=10;" parent="step2_1" vertex="1">
+                    <mxGeometry y="150" width="320" height="62" as="geometry"/>
+                </mxCell>
+                <mxCell id="resolve1" value="🔗 Pfad-Auflösung" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=40;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="1" vertex="1">
+                    <mxGeometry x="780" y="320" width="340" height="120" as="geometry"/>
+                </mxCell>
+                <mxCell id="resolve2" value="audio_path: standort_a/file1.WAV&#xa;→ /recordings/standort_a/file1.WAV" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontFamily=Courier New;fontSize=10;" parent="resolve1" vertex="1">
+                    <mxGeometry y="40" width="340" height="35" as="geometry"/>
+                </mxCell>
+                <mxCell id="resolve3" value="audio_path: standort_b/file5.WAV&#xa;→ /recordings/standort_b/file5.WAV" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontFamily=Courier New;fontSize=10;" parent="resolve1" vertex="1">
+                    <mxGeometry y="75" width="340" height="35" as="geometry"/>
+                </mxCell>
+                <mxCell id="local1" value="📁 Lokale DBs (optional)" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=40;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;fillColor=#dae8fc;strokeColor=#6c8ebf;dashed=1;dashPattern=8 8;" parent="1" vertex="1">
+                    <mxGeometry x="780" y="480" width="340" height="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="local2" value="standort_a/birdnet_analysis.db&#xa;→ Metadaten: GPS, Temp., etc." style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontStyle=2;" parent="local1" vertex="1">
+                    <mxGeometry y="40" width="340" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="local3" value="standort_b/birdnet_analysis.db&#xa;→ Metadaten: GPS, Temp., etc." style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontStyle=2;" parent="local1" vertex="1">
+                    <mxGeometry y="70" width="340" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="audio1" value="🎵 Audio-Dateien" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=40;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;fillColor=#e1d5e7;strokeColor=#9673a6;" parent="1" vertex="1">
+                    <mxGeometry x="780" y="620" width="340" height="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="audio2" value="recordings/standort_a/file1.WAV&#xa;→ Extrahiere 08:32:21 - 08:32:24" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontFamily=Courier New;fontSize=10;" parent="audio1" vertex="1">
+                    <mxGeometry y="40" width="340" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="audio3" value="recordings/standort_b/file5.WAV&#xa;→ Extrahiere 14:15:30 - 14:15:33" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontFamily=Courier New;fontSize=10;" parent="audio1" vertex="1">
+                    <mxGeometry y="70" width="340" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="result1" value="✨ Ergebnis für Nutzer" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=40;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;fillColor=#fff2cc;strokeColor=#d6b656;" parent="1" vertex="1">
+                    <mxGeometry x="780" y="760" width="340" height="180" as="geometry"/>
+                </mxCell>
+                <mxCell id="result2" value="Result 1:&#xa;  Kohlmeise @ 08:32:21&#xa;  Confidence: 0.89&#xa;  Distanz zum Query: 0.12&#xa;  ▶️ Audio abspielen" style="text;strokeColor=none;fillColor=#d5e8d4;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontStyle=1;" parent="result1" vertex="1">
+                    <mxGeometry y="40" width="340" height="65" as="geometry"/>
+                </mxCell>
+                <mxCell id="result3" value="Result 2:&#xa;  Blaumeise @ 14:15:30&#xa;  Confidence: 0.78&#xa;  Distanz zum Query: 0.18&#xa;  ▶️ Audio abspielen" style="text;strokeColor=none;fillColor=#d5e8d4;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontStyle=1;" parent="result1" vertex="1">
+                    <mxGeometry y="105" width="340" height="65" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;" parent="1" source="query1" target="diskann1" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;" parent="1" source="diskann3" target="step1_2" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow2label" value="vector_ids" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" parent="arrow2" vertex="1" connectable="0">
+                    <mxGeometry x="-0.1" y="2" relative="1" as="geometry">
+                        <mxPoint as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;" parent="1" source="step1_1" target="step2_1" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;" parent="1" source="step2_4" target="resolve2" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;" parent="1" source="step2_5" target="resolve3" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;dashed=1;dashPattern=8 8;" parent="1" source="resolve1" target="local1" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow6label" value="Optional:&#xa;Metadaten" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" parent="arrow6" vertex="1" connectable="0">
+                    <mxGeometry x="-0.2" y="1" relative="1" as="geometry">
+                        <mxPoint as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;" parent="1" source="resolve1" target="audio1" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;" parent="1" source="audio1" target="result1" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=1;dashed=1;dashPattern=8 8;strokeColor=#9673a6;" parent="1" source="step1_3" target="result2" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="360" y="255"/>
+                            <mxPoint x="360" y="833"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow9label" value="Embedding-Vektoren&#xa;für Anzeige/Visualisierung" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=10;" parent="arrow9" vertex="1" connectable="0">
+                    <mxGeometry x="0.5" y="2" relative="1" as="geometry">
+                        <mxPoint x="60" y="-8" as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="note1" value="ℹ️ Die globale DB enthält ALLE Informationen.&#xa;Lokale DBs sind nur für zusätzliche Metadaten nötig." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=2;fontSize=11;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="320" width="300" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="note2" value="⚡ Schnelligkeit:&#xa;DiskANN-Suche: &lt;100ms bei 1 Mio. Vektoren&#xa;SQLite-Lookup: &lt;1ms pro vector_id" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=2;fontSize=11;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="420" width="300" height="70" as="geometry"/>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
+</mxfile>
