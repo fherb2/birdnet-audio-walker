@@ -1,0 +1,164 @@
+<mxfile host="app.diagrams.net" modified="2026-02-14T12:00:00.000Z" agent="Claude" version="21.0.0">
+  <diagram name="Globale DB-Erstellung" id="global">
+    <mxGraphModel dx="1422" dy="794" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        
+        <!-- Lokale DB Standort A -->
+        <mxCell id="localA1" value="📁 Standort A" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=40;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="40" y="40" width="280" height="180" as="geometry" />
+        </mxCell>
+        <mxCell id="localA2" value="embeddings:" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontStyle=1;" vertex="1" parent="localA1">
+          <mxGeometry y="40" width="280" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="localA3" value="  vector_id: 0, hash: abc123..." style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;" vertex="1" parent="localA1">
+          <mxGeometry y="65" width="280" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="localA4" value="  vector_id: 1, hash: def456..." style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;" vertex="1" parent="localA1">
+          <mxGeometry y="90" width="280" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="localA5" value="  vector_id: 2, hash: xyz999..." style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;" vertex="1" parent="localA1">
+          <mxGeometry y="115" width="280" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="localA6" value="detections: 3 Kohlmeisen, 2 Amseln" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontStyle=2;" vertex="1" parent="localA1">
+          <mxGeometry y="140" width="280" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- Lokale DB Standort B -->
+        <mxCell id="localB1" value="📁 Standort B" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=40;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="40" y="260" width="280" height="180" as="geometry" />
+        </mxCell>
+        <mxCell id="localB2" value="embeddings:" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontStyle=1;" vertex="1" parent="localB1">
+          <mxGeometry y="40" width="280" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="localB3" value="  vector_id: 0, hash: abc123..." style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fillColor=#fff2cc;" vertex="1" parent="localB1">
+          <mxGeometry y="65" width="280" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="localB4" value="  vector_id: 1, hash: jkl111..." style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;" vertex="1" parent="localB1">
+          <mxGeometry y="90" width="280" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="localB5" value="  vector_id: 2, hash: mno222..." style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;" vertex="1" parent="localB1">
+          <mxGeometry y="115" width="280" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="localB6" value="detections: 2 Kohlmeisen, 3 Blaumeisen" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontStyle=2;" vertex="1" parent="localB1">
+          <mxGeometry y="140" width="280" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- Import-Prozess -->
+        <mxCell id="import1" value="🔄 Import-Prozess" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=40;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="400" y="40" width="220" height="400" as="geometry" />
+        </mxCell>
+        <mxCell id="import2" value="Hash abc123 in global?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="import1">
+          <mxGeometry x="40" y="50" width="140" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="import3" value="NEIN → Neu" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="import1">
+          <mxGeometry x="60" y="115" width="100" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="import4" value="Hash def456 in global?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="import1">
+          <mxGeometry x="40" y="145" width="140" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="import5" value="NEIN → Neu" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="import1">
+          <mxGeometry x="60" y="210" width="100" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="import6" value="Hash abc123 in global?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;" vertex="1" parent="import1">
+          <mxGeometry x="40" y="240" width="140" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="import7" value="JA → Wiederverwenden!" style="text;html=1;strokeColor=none;fillColor=#fff2cc;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontStyle=1;" vertex="1" parent="import1">
+          <mxGeometry x="45" y="305" width="130" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="import8" value="Hash jkl111 in global?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="import1">
+          <mxGeometry x="40" y="335" width="140" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- Globale DB -->
+        <mxCell id="global1" value="🌍 birdnet_global.db" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=40;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="700" y="40" width="340" height="400" as="geometry" />
+        </mxCell>
+        <mxCell id="global2" value="embeddings Tabelle:" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontStyle=1;" vertex="1" parent="global1">
+          <mxGeometry y="40" width="340" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="global3" value="  vector_id: 0, hash: abc123..., blob: ..." style="text;strokeColor=none;fillColor=#fff2cc;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;" vertex="1" parent="global1">
+          <mxGeometry y="65" width="340" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="global4" value="  vector_id: 1, hash: def456..., blob: ..." style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;" vertex="1" parent="global1">
+          <mxGeometry y="90" width="340" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="global5" value="  vector_id: 2, hash: xyz999..., blob: ..." style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;" vertex="1" parent="global1">
+          <mxGeometry y="115" width="340" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="global6" value="  vector_id: 3, hash: jkl111..., blob: ..." style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;" vertex="1" parent="global1">
+          <mxGeometry y="140" width="340" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="global7" value="  vector_id: 4, hash: mno222..., blob: ..." style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;" vertex="1" parent="global1">
+          <mxGeometry y="165" width="340" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="global8" value="" style="line;strokeWidth=1;fillColor=none;align=left;verticalAlign=middle;spacingTop=-1;spacingLeft=3;spacingRight=3;rotatable=0;labelPosition=right;points=[];portConstraint=eastwest;" vertex="1" parent="global1">
+          <mxGeometry y="190" width="340" height="8" as="geometry" />
+        </mxCell>
+        <mxCell id="global9" value="detections Tabelle:" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontStyle=1;" vertex="1" parent="global1">
+          <mxGeometry y="198" width="340" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="global10" value="  audio_path: standort_a/file1.WAV, vector_id: 0" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;" vertex="1" parent="global1">
+          <mxGeometry y="223" width="340" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="global11" value="  audio_path: standort_a/file2.WAV, vector_id: 1" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;" vertex="1" parent="global1">
+          <mxGeometry y="248" width="340" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="global12" value="  audio_path: standort_a/file3.WAV, vector_id: 2" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;" vertex="1" parent="global1">
+          <mxGeometry y="273" width="340" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="global13" value="  audio_path: standort_b/file1.WAV, vector_id: 0" style="text;strokeColor=none;fillColor=#fff2cc;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontStyle=1;" vertex="1" parent="global1">
+          <mxGeometry y="298" width="340" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="global14" value="  audio_path: standort_b/file2.WAV, vector_id: 3" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;" vertex="1" parent="global1">
+          <mxGeometry y="323" width="340" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="global15" value="  audio_path: standort_b/file3.WAV, vector_id: 4" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;" vertex="1" parent="global1">
+          <mxGeometry y="348" width="340" height="25" as="geometry" />
+        </mxCell>
+
+        <!-- DiskANN Global -->
+        <mxCell id="diskann1" value="💾 birdnet_vectors_global.diskann/" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="40" width="260" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="diskann2" value="Index mit 5 Vektoren&#xa;IDs: 0, 1, 2, 3, 4" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="60" width="260" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- Wichtiger Hinweis -->
+        <mxCell id="note1" value="⚠️ DEDUPLIZIERUNG:&#xa;Standort B hat gleichen Hash (abc123)&#xa;→ Vektor wird NICHT dupliziert&#xa;→ Beide Detections nutzen vector_id: 0" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="700" y="480" width="340" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- Arrows -->
+        <mxCell id="arrow1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.25;entryDx=0;entryDy=0;" edge="1" parent="1" source="localA3" target="import2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="arrow2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="localB3" target="import6">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="arrow3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="import2" target="global3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="arrow4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#d6b656;strokeWidth=3;" edge="1" parent="1" source="import6" target="global3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="arrow4label" value="Wiederverwendet!" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontStyle=1;fillColor=#fff2cc;" vertex="1" connectable="0" parent="arrow4">
+          <mxGeometry x="0.1" y="2" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="arrow5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="global3" target="diskann1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Ergebnis-Box -->
+        <mxCell id="result1" value="ERGEBNIS:&#xa;6 Detections in globaler DB&#xa;5 Vektoren in embeddings&#xa;5 Vektoren in DiskANN" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="140" width="260" height="100" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
