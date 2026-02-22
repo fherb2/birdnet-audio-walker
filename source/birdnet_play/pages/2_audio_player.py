@@ -97,6 +97,10 @@ def init_audio_state():
         st.session_state['audio_speech_loudness'] = -2
     if 'audio_frame_duration' not in st.session_state:
         st.session_state['audio_frame_duration'] = 1.0  # 0.5 - 6.0 seconds
+    if 'audio_noise_reduction' not in st.session_state:
+        st.session_state['audio_noise_reduction'] = True
+    if 'audio_noise_reduce_strength' not in st.session_state:
+        st.session_state['audio_noise_reduce_strength'] = 0.8
 
 
 # Initialize session state
@@ -377,6 +381,34 @@ st.session_state['audio_frame_duration'] = frame_duration
 
 st.sidebar.divider()
 
+# Noise Reduction
+noise_reduction_on = st.sidebar.checkbox(
+    "Noise Reduction",
+    value=st.session_state['audio_noise_reduction'],
+    key="sidebar_noise_reduction"
+)
+st.session_state['audio_noise_reduction'] = noise_reduction_on
+
+if noise_reduction_on:
+    import numpy as np
+    _nr_steps = np.logspace(np.log10(0.5), np.log10(1.0), 20)
+    _current_val = st.session_state['audio_noise_reduce_strength']
+    _current_idx = int(np.argmin(np.abs(_nr_steps - _current_val)))
+
+    nr_strength_idx = st.sidebar.slider(
+        "Noise Reduction Strength",
+        min_value=0,
+        max_value=19,
+        value=_current_idx,
+        step=1,
+        key="sidebar_nr_strength",
+        help="Logarithmic scale: finer steps near 1.0 (stronger reduction)"
+    )
+    st.session_state['audio_noise_reduce_strength'] = float(_nr_steps[nr_strength_idx])
+    st.sidebar.caption(f"prop_decrease = {_nr_steps[nr_strength_idx]:.3f}")
+
+st.sidebar.divider()
+
 # Apply Audio Settings Button
 if st.sidebar.button("🎵 **Apply Audio Settings**", type="primary", width="stretch"):
     st.session_state['audio_settings_applied'] = True
@@ -528,7 +560,10 @@ audio_options = {
     'say_confidence': st.session_state['audio_say_confidence'],
     'bird_name_option': st.session_state['audio_bird_name'],
     'speech_speed': st.session_state['audio_speech_speed'],
-    'speech_loudness': st.session_state['audio_speech_loudness']
+    'speech_loudness': st.session_state['audio_speech_loudness'],
+    'noise_reduce_strength': (
+        st.session_state['audio_noise_reduce_strength'] if st.session_state['audio_noise_reduction'] else None
+    )
 }
 
 # Calculate and display audio statistics

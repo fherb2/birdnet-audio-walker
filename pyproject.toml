@@ -39,6 +39,7 @@ llvmlite = ">=0.43.0"
 numba = ">=0.60.0"
 umap-learn = "^0.5.11"
 nbformat = "^5.10.4"
+noisereduce = "^3.0.3"
 
 
 [tool.poetry.scripts]

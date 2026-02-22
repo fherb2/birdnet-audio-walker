@@ -34,18 +34,7 @@ except ImportError:
 TARGET_LUFS = -16.0  # Target loudness in LUFS (-23 = broadcast, -16 = streaming, -14 = loud)
 FADE_DURATION_MS = 500  # Fade-in/out duration in milliseconds (0.5s)
 COMPRESSOR_THRESHOLD_DB = -20.0  # Compressor threshold
-COMPRESSOR_RATIO = 1.7 # 4.0  # Compression ratio (4:1)
-NOISE_REDUCE_STATIONARY = True  # True = stationary noise (wind, electronics)
-NOISE_REDUCE_DEFAULT_STRENGTH = 0.8  # Default prop_decrease for noise reduction
-
-try:
-    import noisereduce as nr
-    NOISEREDUCE_AVAILABLE = True
-except ImportError:
-    NOISEREDUCE_AVAILABLE = False
-    logger.warning("noisereduce not installed, noise reduction will be disabled")
-    
-    
+COMPRESSOR_RATIO = 4.0 # 4.0  # Compression ratio (4:1)
 
 class AudioPlayer:
     """Audio player for BirdNET detections."""
@@ -106,10 +95,7 @@ class AudioPlayer:
             audio_data, sample_rate = extract_snippet(wav_path, start_offset, end_offset)
             
             # Process audio frame: fade-in/out, LUFS normalization, compression
-            audio_data = self._process_audio_frame(
-                audio_data, sample_rate,
-                noise_reduce_strength=audio_options.get('noise_reduce_strength', NOISE_REDUCE_DEFAULT_STRENGTH)
-            )
+            audio_data = self._process_audio_frame(audio_data, sample_rate)
             
         except Exception as e:
             logger.error(f"Failed to extract/process snippet for detection #{detection['detection_id']}: {e}")
@@ -165,8 +151,7 @@ class AudioPlayer:
     def _process_audio_frame(
         self,
         audio_data: np.ndarray,
-        sample_rate: int,
-        noise_reduce_strength: float = NOISE_REDUCE_DEFAULT_STRENGTH
+        sample_rate: int
     ) -> np.ndarray:
         """
         Process audio frame with fade-in/out, LUFS normalization, and compression.
@@ -205,24 +190,7 @@ class AudioPlayer:
         # Normalize to [-1.0, 1.0] range for processing
         samples = samples / 32768.0
         
-        # 2. Noise reduction (if available and enabled)
-        if NOISEREDUCE_AVAILABLE and noise_reduce_strength is not None:
-            try:
-                samples = nr.reduce_noise(
-                    y=samples,
-                    sr=sample_rate,
-                    prop_decrease=noise_reduce_strength,
-                    stationary=NOISE_REDUCE_STATIONARY,
-                    n_jobs=-1
-                )
-                logger.debug(f"Noise reduction applied (strength={noise_reduce_strength:.3f})")
-            except Exception as e:
-                logger.warning(f"Noise reduction failed: {e}")
-        else:
-            logger.debug("Noise reduction skipped")
-        
-        
-        # 3. LUFS normalization (if available)
+        # 2. LUFS normalization (if available)
         if PYLOUDNORM_AVAILABLE:
             try:
                 # Measure current loudness
@@ -239,7 +207,7 @@ class AudioPlayer:
         else:
             logger.debug("LUFS normalization skipped (pyloudnorm not available)")
         
-        # 4. Apply compressor to prevent clipping (if available)
+        # 3. Apply compressor to prevent clipping (if available)
         if PEDALBOARD_AVAILABLE:
             try:
                 # Create compressor effect
@@ -502,10 +470,7 @@ class AudioPlayer:
             audio_data, sample_rate = extract_snippet(wav_path, start_offset, end_offset)
             
             # Process audio frame: fade-in/out, LUFS normalization, compression
-            audio_data = self._process_audio_frame(
-                audio_data, sample_rate,
-                noise_reduce_strength=audio_options.get('noise_reduce_strength', NOISE_REDUCE_DEFAULT_STRENGTH)
-            )
+            audio_data = self._process_audio_frame(audio_data, sample_rate)
             
         except Exception as e:
             logger.error(f"Failed to extract/process snippet for detection #{detection['detection_id']}: {e}")
@@ -596,10 +561,7 @@ class AudioPlayer:
         
         # Process audio (fade + LUFS + compressor)
         # Returns int16 array
-        processed_samples = self._process_audio_frame(
-            audio_samples, sample_rate,
-            noise_reduce_strength=NOISE_REDUCE_DEFAULT_STRENGTH
-        )
+        processed_samples = self._process_audio_frame(audio_samples, sample_rate)
         
         # Convert to pydub AudioSegment (processed_samples is already int16)
         audio_segment = AudioSegment(
