@@ -132,25 +132,27 @@ Dieses Muster – Task schreibt in State, State-Änderung triggert UI-Update –
 
 ### 1.8 Technologie-Entscheidungen
 
-| Bereich | Bisherig (Streamlit) | Neu (NiceGUI) | Begründung |
-|---|---|---|---|
-| Web-Framework | Streamlit | NiceGUI + uvicorn | Event-Loop-Zugriff, Flexibilität |
-| Heatmap | Altair | ECharts (via `ui.echart`) | Nativ in NiceGUI, Kontextmenü, Klick-Events |
-| Tabellen / Grid | st-aggrid | `ui.aggrid` | Direkt verfügbar in NiceGUI |
-| Species-Suche | streamlit-searchbox | Custom (`ui.input` + Dropdown) | Kein Äquivalent in NiceGUI, selbst gebaut |
-| Audio-Player | HTML/JS (embedded) | HTML/JS (embedded via `ui.html`) | Bewährte Lösung, direkt übertragbar |
-| State | `st.session_state` | `AppState`-Klasse (server-side) | Zentraler Server-State statt Client-State |
-| Background-Tasks | Nicht möglich | `asyncio.create_task()` | Kernvorteil des Umbaus |
+
+| Bereich          | Bisherig (Streamlit) | Neu (NiceGUI)                   | Begründung                                  |
+| ------------------ | ---------------------- | --------------------------------- | ---------------------------------------------- |
+| Web-Framework    | Streamlit            | NiceGUI + uvicorn               | Event-Loop-Zugriff, Flexibilität            |
+| Heatmap          | Altair               | ECharts (via`ui.echart`)        | Nativ in NiceGUI, Kontextmenü, Klick-Events |
+| Tabellen / Grid  | st-aggrid            | `ui.aggrid`                     | Direkt verfügbar in NiceGUI                 |
+| Species-Suche    | streamlit-searchbox  | Custom (`ui.input` + Dropdown)  | Kein Äquivalent in NiceGUI, selbst gebaut   |
+| Audio-Player     | HTML/JS (embedded)   | HTML/JS (embedded via`ui.html`) | Bewährte Lösung, direkt übertragbar       |
+| State            | `st.session_state`   | `AppState`-Klasse (server-side) | Zentraler Server-State statt Client-State    |
+| Background-Tasks | Nicht möglich       | `asyncio.create_task()`         | Kernvorteil des Umbaus                       |
 
 ---
 
-## Teil 2: Database Overview (Seite 1)
+## Teil 2: Database Overview
 
 ### 2.1 Überblick dieser Seite
 
 Die Database-Overview-Seite ist der Einstiegspunkt des Systems. Sie erfüllt vier Aufgaben: Sie ermöglicht die Auswahl der aktiven Datenbank, zeigt Metadaten zur gewählten Datenbank an, pflegt und zeigt die Species-Liste, und bietet einen Sprungpunkt zum Audio-Player für eine ausgewählte Spezies. Die Seite ist nicht der Ort für Audio-Wiedergabe oder Filteroperationen – sie ist der administrative Startpunkt.
 
 **Elemente im Überblick:**
+
 - Datenbankauswahl (Dropdown aus gescanntem Verzeichnis)
 - Datenbankinfo (Sprache, Confidence-Schwelle, Erstellungsdatum, Anzahl Spezies)
 - Notizfeld mit Speichern-Button
@@ -268,13 +270,14 @@ Wenn der Server mit dem Flag `--read-only` gestartet wurde, ist der AppState ent
 
 ---
 
-## Teil 3: Audio Player (Seite 2)
+## Teil 3: Audio Player
 
 ### 3.1 Überblick dieser Seite
 
 Der Audio Player ist die Kernseite des Systems. Er ermöglicht das gefilterte Abrufen von Vogelerkennungen aus der Datenbank, die Konfiguration von Audio-Optionen, die Generierung der kombinierten Audio-Dateien (Snippet + TTS) und deren Wiedergabe in einem eingebetteten Browser-Player. Zusätzlich können die generierten Dateien als WAV oder MP3 exportiert werden.
 
 **Elemente im Überblick:**
+
 - Filterbereich (Spezies, Datum, Zeit, Confidence, Limit, Offset, Sortierung)
 - Xeno-Canto-Link (kontextuell)
 - "Apply Filters"-Button
@@ -430,13 +433,14 @@ Da der Cache im Server-State liegt, überlebt er eine Client-Verbindungstrennung
 
 ---
 
-## Teil 4: Activity Heatmap (Seite 3)
+## Teil 4: Activity Heatmap
 
 ### 4.1 Überblick dieser Seite
 
 Die Heatmap-Seite visualisiert die zeitliche Verteilung von Vogelerkennungen über einen Datumsbereich. Die X-Achse zeigt Tage, die Y-Achse zeigt Tageszeit in 30-Minuten-Intervallen (48 Slots von 00:00 bis 23:30). Jede Zelle repräsentiert die Aktivität in einem 30-Minuten-Fenster an einem bestimmten Tag – entweder als Summe der Konfidenzwerte oder als Anzahl der Detektionen.
 
 **Elemente im Überblick:**
+
 - Filterbereich (Spezies, Datum, Confidence)
 - "Apply Filters"-Button
 - Heatmap-Optionen (Colormap, Gewichtungsmodus)
@@ -706,5 +710,3 @@ Der Filebrowser wird als eine weitere Seite implementiert. NiceGUI ermöglicht r
 Remote- und Docker-Betrieb sind von Beginn an unterstützt, da der Server auf `0.0.0.0` lauscht und keine lokalen GUI-Bibliotheken benötigt.
 
 ---
-
-
