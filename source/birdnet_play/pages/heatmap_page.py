@@ -737,19 +737,6 @@ async def _open_click_dialog(
                     if audio_files else "Audio generation failed for all detections."
                 )
                 progress.set_visibility(False)
-
-                # if audio_files:
-                #     session_id = str(uuid.uuid4())
-                #     _dialog_audio_store[session_id] = audio_files
-                #     cleanup_ref['session_id'] = session_id
-                #     container_id = player_container.id
-
-                #     await asyncio.sleep(0.1)
-
-                #     await ui.run_javascript(
-                #         _build_dialog_player_js(session_id, container_id),
-                #         timeout=5.0,
-                #     )
                 
                 if audio_files:
                     session_id = str(uuid.uuid4())
