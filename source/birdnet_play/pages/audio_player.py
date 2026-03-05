@@ -520,7 +520,6 @@ async def audio_player() -> None:
     # -----------------------------------------------------------------------
     async def _apply_filters() -> None:
         """Read UI widgets into AppState, query detections, start generation."""
-        logger.info(f"_apply_filters called, active_db={state.active_db}, species={state.ap_filter_species}") # DEBUG
          
         # Write filter state
         state.ap_filter_use_time = use_time.value
@@ -608,8 +607,6 @@ async def audio_player() -> None:
         finally:
             apply_btn.enable()
 
-        logger.info(f"Query returned {len(detections)} detections") # DEBUG
-
         if not detections:
             ui.notify('No detections found', type='warning')
             return
@@ -683,7 +680,6 @@ async def audio_player() -> None:
         The first file is used to initialise the player HTML (so the
         player is injected into the DOM on first file ready, not before).
         """
-        logger.info(f"_generation_task started, {len(state.detections)} detections") # DEBUG
         if not state.detections:
             return
 
@@ -728,7 +724,6 @@ async def audio_player() -> None:
                             disable_tts=disable_tts,
                         )
                     )
-                    logger.info(f"Audio generated for detection #{det['detection_id']}") # DEBUG
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:
@@ -793,7 +788,6 @@ async def audio_player() -> None:
                             f'window.pendingAudioFiles.push({entry_json});',
                             timeout=5.0,
                         )
-                    logger.info(f"Pushed detection #{det['detection_id']} to pendingAudioFiles") # DEBUG
                 # Update progress
                 progress = (i + 1) / n
                 state.audio_generation_progress = progress
