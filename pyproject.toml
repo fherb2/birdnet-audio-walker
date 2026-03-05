@@ -40,11 +40,12 @@ numba = ">=0.60.0"
 umap-learn = "^0.5.11"
 nbformat = "^5.10.4"
 noisereduce = "^3.0.3"
+nicegui = "^3.8.0"
 
 
 [tool.poetry.scripts]
 birdnet-walker = "birdnet_walker.main:main"
-birdnet-play = "birdnet_play.cli:main"
+birdnet-play = "birdnet_play.main:main"
 time-correlation = "time_correlation.__main__:main"
 
 [build-system]
