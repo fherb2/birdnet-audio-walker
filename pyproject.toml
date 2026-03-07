@@ -1,14 +1,11 @@
 [tool.poetry]
-name = "birdnet-walker"
-version = "0.1.0"
-description = "BirdNET CUDA Batch Analyzer and tools - Analyze recordings with BirdNET"
+name = "birdnet-copter"
+version = "0.2.0"
+description = "Docker and FPGA-capable BirdNET toolset with GUI"
 authors = ["Frank Herbrand <herbrand@gmx.de>"]
 readme = "README.md"
 packages = [
-    { include = "birdnet_walker", from = "source"},
-    { include = "shared", from = "source" },
-    { include = "birdnet_play", from = "source" },
-    { include = "time_correlation", from = "source"}
+    { include = "birdnet_copter", from = "source" },
     ]
 
 [tool.poetry.dependencies]
@@ -41,12 +38,12 @@ umap-learn = "^0.5.11"
 nbformat = "^5.10.4"
 noisereduce = "^3.0.3"
 nicegui = "^3.8.0"
+psutil = "^6.0.0"
+pynvml = "^13.0.1"
 
 
 [tool.poetry.scripts]
-birdnet-walker = "birdnet_walker.main:main"
-birdnet-play = "birdnet_play.main:main"
-time-correlation = "time_correlation.__main__:main"
+birdnet-copter = "birdnet_copter.main:main"
 
 [build-system]
 requires = ["poetry-core"]

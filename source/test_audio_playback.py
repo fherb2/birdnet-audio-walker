@@ -4,7 +4,7 @@ Test audio playback with sounddevice.
 
 import numpy as np
 import sounddevice as sd
-from birdnet_play.tts import generate_tts
+from birdnet_copter.tts import generate_tts
 
 def test_playback():
     """Test if audio plays through speakers."""

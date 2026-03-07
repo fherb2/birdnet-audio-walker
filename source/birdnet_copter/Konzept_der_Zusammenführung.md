@@ -24,12 +24,8 @@ integriert. Die GUI erhält drei neue bzw. umstrukturierte Seiten.
 ### 2.1 Verzeichnis-Layout (Zielzustand)
 
 ```
-source/
-├── shared/                         # unverändert
-│   ├── __init__.py
-│   ├── db_queries.py
-│   ├── audio_extract.py
-│   └── streamlit_utils.py          # find_databases_recursive() weiter genutzt; File umbenennen!
+ source/
+├── shared/                         # entfällt; die 3 Module werden nach birdnet_copter verschoben
 │
 ├── birdnet_walker/                 # Entfällt: Inhalt der Files oder ganze Files werden nach 
 │                                   # birdnet_copter übernommen.
@@ -45,10 +41,13 @@ source/
     ├── filters.py                  # unverändert
     ├── player.py                   # unverändert
     ├── tts.py                      # unverändert
+    ├── db_queries.py               # aus shared/
+    ├── audio_extract.py            # aus shared/
+    ├── utils.py                    # ehemals: shared/streamlit_utils.py Umbenannt!
     │
     ├── gui_elements/               # unverändert
     │   ├── __init__.py
-    │   ├── folder_tree.py          # ERWEITERT: schlankere Variante für Hangar
+    │   ├── folder_tree.py          # ERWEITERT: schlankere Variante für Hangar ers5tellen
     │   └── species_search.py
     │
     └── pages/
@@ -109,6 +108,8 @@ birdnet-copter läuft in **drei Prozessen**:
 │  Status aus Manager   │         │  in progress_queue       │
 └───────────────────────┘         └─────────────────────────┘
 ```
+
+Es wir langfristig nicht bei diesen 3 Prozessen bleiben: Es kommen Analyzefunktionen später hinzu, die in eigenen Prozessen ablaufern werden. Aber das ist nicht Teil dieses Entwicklungsschritts. Diese werden meist inform von Workern arbeiten. Also entweder mit kurzer paralleler Laufzeit oder mit per Queue gesteuerten Aufträgen.
 
 ### 3.1 Kommunikationskanäle
 
