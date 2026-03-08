@@ -78,12 +78,12 @@ async def hangar() -> None:
                     f'{hw.cpu_count_for_inference}{note}'
                 ).classes('text-body2' + (' text-orange-7' if hw.sleep_flag else ''))
 
-# -----------------------------------------------------------------------
+    # -----------------------------------------------------------------------
     # Section 2: Root Path
     # -----------------------------------------------------------------------
     with ui.card().classes('w-full q-mb-md'):
         ui.label('🌍 Flying Area: Root Path / Global DB Path').classes('text-h6 q-mb-xs')
-        root_label = ui.label(str(state.root_path)).classes('text-body2 text-grey-8 q-mb-xs')
+        root_label = ui.label(str(state.root_path)).classes('text-body2 text-grey-10 q-mb-xs')
         root_dialog_btn = ui.button('📁 Change', on_click=lambda: asyncio.create_task(_open_root_dialog())).props('no-caps')
 
     with ui.dialog() as root_dialog:
@@ -127,7 +127,7 @@ async def hangar() -> None:
     # Section 3: Inference Configuration
     # -----------------------------------------------------------------------
     with ui.card().classes('w-full q-mb-md'):
-        ui.label('🚁 Scout flight: Inference Configuration').classes('text-h6 q-mb-xs')
+        ui.label('⚙️ GPU Processing').classes('text-h6 q-mb-xs')
 
         hw = state.hw_info
         gpu_available = hw is not None and hw.has_nvidia_gpu
@@ -146,22 +146,7 @@ async def hangar() -> None:
             state.use_gpu = val
             logger.debug(f'use_gpu set to {val}')
 
-        with ui.column().classes('gap-0'):
-            ui.switch(
-                'Include Embedding Vectors Of Detections',
-                value=state.use_embeddings,
-                on_change=lambda e: _on_embeddings_change(e.value),
-            )
-            ui.label(
-                'Extracts 1024-dim feature vectors for clustering and similarity search. '
-                'Increases analysis time by approx. 2×.'
-            ).classes('text-caption text-grey-6 q-ml-md')
-
-        def _on_embeddings_change(val: bool) -> None:
-            state.use_embeddings = val
-            logger.debug(f'use_embeddings set to {val}')
-
-# -----------------------------------------------------------------------
+    # -----------------------------------------------------------------------
     # Section 4: Global Index
     # -----------------------------------------------------------------------
     with ui.card().classes('w-full q-mb-md'):
@@ -177,7 +162,7 @@ async def hangar() -> None:
         with global_path_row:
             global_path_display = ui.label(
                 str(state.global_index_path or state.root_path)
-            ).classes('text-body2 text-grey-8 flex-grow')
+            ).classes('text-body2 text-grey-10 flex-grow')
             ui.button('📁 Change', on_click=lambda: asyncio.create_task(_open_global_dialog())).props('no-caps')
 
         ui.label(

@@ -382,27 +382,29 @@ async def heatmap_page() -> None:
                     state.hm_filter_date_to = state.hm_filter_date_to or date.today()
 
             with ui.row().classes("gap-3"):
-                date_from_input = ui.date(
+                date_from_input = ui.input(
+                    label='Date From',
                     value=state.hm_filter_date_from.isoformat()
-                          if state.hm_filter_date_from else None,
-                ).props("label='Date From' dense outlined").classes("w-36")
+                          if state.hm_filter_date_from else '',
+                ).props('type=date outlined dense').classes('w-40')
                 date_from_input.on(
-                    "update:modelValue",
+                    'change',
                     lambda e: setattr(
-                        state, "hm_filter_date_from",
-                        date.fromisoformat(e.args) if e.args else None,
+                        state, 'hm_filter_date_from',
+                        date.fromisoformat(e.args['value']) if e.args.get('value') else None,
                     ),
                 )
 
-                date_to_input = ui.date(
+                date_to_input = ui.input(
+                    label='Date To',
                     value=state.hm_filter_date_to.isoformat()
-                          if state.hm_filter_date_to else None,
-                ).props("label='Date To' dense outlined").classes("w-36")
+                          if state.hm_filter_date_to else '',
+                ).props('type=date outlined dense').classes('w-40')
                 date_to_input.on(
-                    "update:modelValue",
+                    'change',
                     lambda e: setattr(
-                        state, "hm_filter_date_to",
-                        date.fromisoformat(e.args) if e.args else None,
+                        state, 'hm_filter_date_to',
+                        date.fromisoformat(e.args['value']) if e.args.get('value') else None,
                     ),
                 )
 
@@ -747,8 +749,6 @@ async def _open_click_dialog(
                     with player_container:
                         wait_label = ui.label("⏳ Wait until audio is downloaded...") \
                             .classes("text-caption text-grey-6 q-mt-sm")
-
-                    await asyncio.sleep(0.1)
 
                     await ui.run_javascript(
                         _build_dialog_player_js(session_id, container_id),

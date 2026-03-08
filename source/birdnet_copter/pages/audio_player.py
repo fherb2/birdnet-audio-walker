@@ -107,10 +107,12 @@ async def audio_player() -> None:
         state.ap_filter_date_to = max_date.date()
 
     with ui.row().classes('gap-4 items-end'):
-        date_from = ui.date(value=str(state.ap_filter_date_from) if state.ap_filter_date_from else None) \
-            .props('outlined dense label="Date From"')
-        date_to = ui.date(value=str(state.ap_filter_date_to) if state.ap_filter_date_to else None) \
-            .props('outlined dense label="Date To"')
+        date_from = ui.input(label='Date From',
+                             value=str(state.ap_filter_date_from) if state.ap_filter_date_from else '') \
+            .props('type=date outlined dense')
+        date_to = ui.input(label='Date To',
+                           value=str(state.ap_filter_date_to) if state.ap_filter_date_to else '') \
+            .props('type=date outlined dense')
 
     # Time filter (optional)
     use_time = ui.checkbox(
@@ -429,9 +431,27 @@ async def audio_player() -> None:
               <span style="color:#777; font-size:13px;">No items played yet</span>
             </div>
           </div>
+          <div style="display:flex; gap:8px; margin-top:10px;">
+            <button onclick="var a=document.getElementById('bp-audio');if(a.paused){{a.play();}}else{{a.pause();}}"
+              style="background:#e94560;color:white;border:none;padding:8px 14px;border-radius:4px;cursor:pointer;">
+              ▶ Play/Pause
+            </button>
+            <button onclick="window._bpPrev && window._bpPrev();"
+              style="background:#e94560;color:white;border:none;padding:8px 14px;border-radius:4px;cursor:pointer;">
+              ⏮ Prev
+            </button>
+            <button onclick="window._bpNext && window._bpNext();"
+              style="background:#e94560;color:white;border:none;padding:8px 14px;border-radius:4px;cursor:pointer;">
+              ⏭ Next
+            </button>
+            <button onclick="var a=document.getElementById('bp-audio');a.pause();a.currentTime=0;document.getElementById('bp-status').textContent='Stopped';"
+              style="background:#555;color:white;border:none;padding:8px 14px;border-radius:4px;cursor:pointer;">
+              ⏹ Stop
+            </button>
+          </div>
         </div>
         """
-        
+
     def _build_player_js(initial_files_json: str) -> str:
         return f"""
           var audioFiles = {initial_files_json};
@@ -749,36 +769,33 @@ async def audio_player() -> None:
                 }
 
                 if not first_file_rendered:
-                    player_container.clear()
-                    with player_container:
-                        ui.html(_build_player_html(json.dumps([file_entry])))
-                        with ui.row().classes('gap-2 q-mt-sm'):
-                            ui.button('▶ Play/Pause', on_click=lambda: ui.run_javascript(
-                                "var a=document.getElementById('bp-audio');"
-                                "if(a.paused){if(!a.src){"
-                                "var d=document.getElementById('bp-details');"
-                                "d.style.display='none';}a.play();}else{a.pause();}"
-                            )).props('no-caps').style('background:#e94560;color:white;')
-                            ui.button('⏮ Prev', on_click=lambda: ui.run_javascript(
-                                "var a=document.getElementById('bp-audio');"
-                                "window._bpPrev && window._bpPrev();"
-                            )).props('no-caps').style('background:#e94560;color:white;')
-                            ui.button('⏭ Next', on_click=lambda: ui.run_javascript(
-                                "var a=document.getElementById('bp-audio');"
-                                "window._bpNext && window._bpNext();"
-                            )).props('no-caps').style('background:#e94560;color:white;')
-                            ui.button('⏹ Stop', on_click=lambda: ui.run_javascript(
-                                "var a=document.getElementById('bp-audio');"
-                                "a.pause();a.currentTime=0;"
-                                "document.getElementById('bp-status').textContent='Stopped';"
-                            )).props('no-caps').style('background:#555;color:white;')
-                    player_container.set_visibility(True)
+                    player_html = _build_player_html(json.dumps([file_entry])).replace('`', '\\`')
                     with client:
                         await ui.run_javascript(
-                            _build_player_js(json.dumps([file_entry])),
+                            f'document.getElementById("c{player_container.id}").innerHTML = `{player_html}`;',
                             timeout=5.0,
                         )
+                    player_container.set_visibility(True)
+                    try:
+                        with client:
+                            await ui.run_javascript(
+                                f"""
+                                (function poll(attempts) {{
+                                var a = document.getElementById('bp-audio');
+                                if (a) {{
+                                    {_build_player_js(json.dumps([file_entry]))}
+                                }} else if (attempts > 0) {{
+                                    setTimeout(function() {{ poll(attempts - 1); }}, 100);
+                                }}
+                                }})(20);
+                                """,
+                                timeout=5.0,
+                            )
+                        logger.info("run_javascript completed OK")
+                    except Exception as e:
+                        logger.error(f"run_javascript failed: {e}")
                     first_file_rendered = True
+
                 else:
                     entry_json = json.dumps(file_entry)
                     with client:
@@ -880,10 +897,23 @@ async def audio_player() -> None:
                             'audio_data': state.audio_cache[det_id],
                         })
                 if files:
-                    _raw_html = _build_player_html(json.dumps(files))
-                _html_part = _raw_html[:_raw_html.index('<script>')]
-                _js_part = _raw_html[_raw_html.index('<script>')+8:_raw_html.rindex('</script>')]
-                player_container.clear()
-                with player_container:
-                    ui.html(_html_part)
-                await ui.run_javascript(_js_part, timeout=5.0)
+                    player_html = _build_player_html(json.dumps(files)).replace('`', '\\`')
+                    await ui.run_javascript(
+                        f'document.getElementById("c{player_container.id}").innerHTML = `{player_html}`;',
+                        timeout=5.0,
+                    )
+                    player_container.set_visibility(True)
+                    await ui.run_javascript(
+                        f"""
+                        (function poll(attempts) {{
+                          var a = document.getElementById('bp-audio');
+                          if (a) {{
+                            {_build_player_js(json.dumps(files))}
+                          }} else if (attempts > 0) {{
+                            setTimeout(function() {{ poll(attempts - 1); }}, 100);
+                          }}
+                        }})(20);
+                        """,
+                        timeout=5.0,
+                    )
+                    

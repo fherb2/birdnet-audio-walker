@@ -111,11 +111,13 @@ def _is_diskann(folder: Path) -> bool:
 
 
 def _count_audio_files(folder: Path) -> int:
-    """Count audio files directly inside folder (non-recursive)."""
-    return sum(
-        1 for f in folder.iterdir()
-        if f.is_file() and f.suffix.lower() in AUDIO_EXTENSIONS
-    )
+    try:
+        return sum(
+            1 for f in folder.iterdir()
+            if f.is_file() and f.suffix.lower() in AUDIO_EXTENSIONS
+        )
+    except PermissionError:
+        return -1  # sentinel: no access
 
 
 def _check_db_status(folder: Path) -> str:
@@ -127,11 +129,11 @@ def _check_db_status(folder: Path) -> str:
         'incomplete' – db exists but not all audio files are registered
         'complete'   – db exists and all audio files are registered
     """
-    db_path = folder / DB_FILENAME
-    if not db_path.exists():
-        return 'absent'
-
     try:
+        db_path = folder / DB_FILENAME
+        if not db_path.exists():
+            return 'absent'
+
         audio_files = {
             f.name for f in folder.iterdir()
             if f.is_file() and f.suffix.lower() in AUDIO_EXTENSIONS
@@ -147,6 +149,9 @@ def _check_db_status(folder: Path) -> str:
         conn.close()
 
         return 'complete' if audio_files <= db_files else 'incomplete'
+
+    except PermissionError:
+        return 'no_access'
 
     except Exception:
         return 'incomplete'
@@ -239,13 +244,13 @@ class FolderTree:
                 ).props('flat dense round size=sm').tooltip('Go up one level')
                 if at_min:
                     up_btn.disable()
-                ui.label(str(self._root)).classes('text-caption text-grey-7')
+                ui.label(str(self._root)).classes('text-caption text-grey-9')
 
             ui.separator()
 
             # Spinner while loading
             spinner = ui.spinner(size='sm')
-            placeholder = ui.label('Scanning…').classes('text-caption text-grey-5 px-4')
+            placeholder = ui.label('Scanning…').classes('text-caption text-grey-7 px-4')
 
         # Load folder data asynchronously
         asyncio.create_task(self._load_and_render(spinner, placeholder))
@@ -284,7 +289,7 @@ class FolderTree:
 
         if not results:
             with self._container:
-                ui.label('(empty)').classes('text-caption text-grey-5 px-4 py-2')
+                ui.label('(empty)').classes('text-caption text-grey-7 px-4 py-2')
             return
 
         # Render one row per folder
@@ -298,24 +303,36 @@ class FolderTree:
         audio_count: int = info['audio_count']
         db_status: str = info['db_status']
 
+        no_access = (audio_count == -1 or db_status == 'no_access')
         is_selected = (folder == self._selected)
+
         row_classes = (
-            'items-center gap-2 px-3 py-1 rounded cursor-pointer w-full '
-            + ('bg-blue-1' if is_selected else 'hover:bg-grey-2')
+            'items-center gap-2 px-3 py-1 rounded w-full '
+            + ('bg-blue-1' if is_selected
+               else 'hover:bg-grey-2 cursor-pointer' if not no_access
+               else 'cursor-not-allowed')
         )
 
         with ui.row().classes(row_classes) as row:
             ui.icon('folder').classes(
-                'text-yellow-7' if not is_selected else 'text-blue-7'
+                'text-grey-4' if no_access
+                else ('text-blue-7' if is_selected else 'text-yellow-7')
             )
-            ui.label(folder.name).classes('flex-grow text-body2')
+            ui.label(folder.name).classes(
+                'flex-grow text-body2 '
+                + ('text-grey-4' if no_access else 'text-grey-9')
+            )
 
-            if self._show_extras:
+            if no_access:
+                ui.icon('lock').classes('text-grey-4 shrink-0').tooltip(
+                    'Permission denied'
+                )
+            elif self._show_extras:
                 audio_icon_html = SVG_AUDIO_SOME if audio_count > 0 else SVG_AUDIO_NONE
                 ui.html(audio_icon_html).classes('shrink-0').tooltip(
                     f'{audio_count} audio file(s)'
                 )
-                ui.label(str(audio_count)).classes('text-caption w-6 text-right')
+                ui.label(str(audio_count)).classes('text-caption w-6 text-right text-grey-9')
 
                 db_svg = {
                     'absent':     SVG_DB_ABSENT,
@@ -329,7 +346,7 @@ class FolderTree:
                 }[db_status]
                 ui.html(db_svg).classes('shrink-0').tooltip(db_tooltip)
 
-            if self._on_add_job is not None:
+            if self._on_add_job is not None and not no_access:
                 ui.button(
                     icon='add',
                     on_click=lambda f=folder: self._on_add_job(f),
@@ -337,10 +354,12 @@ class FolderTree:
                     'Add folder to scout list'
                 )
 
-        row.on('click', lambda f=folder, r=row: self._on_click(f, r))
-        row.on('dblclick', lambda f=folder: self._drill_down(f))
+        # Click/dblclick only for accessible folders
+        if not no_access:
+            row.on('click', lambda f=folder, r=row: self._on_click(f, r))
+            row.on('dblclick', lambda f=folder: self._drill_down(f))
         self._rows[folder] = row
-        
+                
         
     # ------------------------------------------------------------------
     # Event handlers

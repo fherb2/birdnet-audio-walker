@@ -63,7 +63,7 @@ async def scouting_flight() -> None:
     ui.label(
         'You can add folders for the scouting flight by the + symbol in the list. '
         'Go deeper into the list (double click) if your folder structure has multiple levels.'
-    ).classes('text-caption text-grey-6 q-mb-xs')
+    ).classes('text-caption text-grey-9 q-mb-xs')
     
     def _on_scout_everything() -> None:
         """Add root_path and all subfolders with WAV files to the job list."""
@@ -251,6 +251,24 @@ async def scouting_flight() -> None:
     # Section 3: Job Controls
     # -----------------------------------------------------------------------
     ui.label('🎛 Cockpit Controls').classes('text-h6 q-mb-xs')
+    
+    with ui.row().classes('items-center gap-6 q-mb-sm flex-wrap'):
+        min_conf_input = ui.number(
+            label='Min. Confidence',
+            value=0.4,
+            min=0.01,
+            max=1.0,
+            step=0.05,
+            format='%.2f',
+        ).classes('w-36')
+        with ui.column().classes('gap-0'):
+            embeddings_toggle = ui.switch(
+                'Include Embedding Vectors',
+                value=False,
+            )
+            ui.label(
+                'Extracts 1024-dim feature vectors. Increases analysis time by approx. 2×.'
+            ).classes('text-caption text-grey-6')
 
     with ui.row().classes('gap-2 items-center q-mb-sm flex-wrap'):
 
@@ -261,11 +279,27 @@ async def scouting_flight() -> None:
                 page['walker_started'] = True
                 bundle.shared_state['walker_status'] = 'flying'
 
-            # Send all pending (not-yet-queued) jobs to the walker
+            # Apply current settings to all pending jobs before sending
             pending: list = list(bundle.shared_state.get('pending_jobs', []))
+            conf = float(min_conf_input.value or 0.4)
+            use_emb = embeddings_toggle.value
+
             for job in pending:
+                job.min_conf = conf
+                job.scan_embeddings = use_emb
                 bundle.job_queue.put(job)
-                logger.debug(f'Job sent to walker: {job.folder_path}')
+                logger.debug(
+                    f'Job sent to walker: {job.folder_path} '
+                    f'(min_conf={conf}, embeddings={use_emb})'
+                )
+
+            # Update display in shared_state
+            jobs: list = list(bundle.shared_state.get('jobs', []))
+            for job in pending:
+                for i, j in enumerate(jobs):
+                    if j.get('job_id') == job.job_id:
+                        jobs[i] = {**j, 'min_conf': conf, 'scan_embeddings': use_emb}
+            bundle.shared_state['jobs'] = jobs
             bundle.shared_state['pending_jobs'] = []
             _update_control_buttons()
 

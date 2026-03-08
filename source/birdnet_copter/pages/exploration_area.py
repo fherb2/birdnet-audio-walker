@@ -141,7 +141,7 @@ async def exploration_area() -> None:
         ui.icon('public').classes('text-blue-6')
         global_path_label = ui.label(
             str(state.global_index_path) if state.global_index_path else '(not configured)'
-        ).classes('text-body2')
+        ).classes('text-body2 text-grey-10')
 
     # Initial visibility
     _is_global = state.active_db_is_global
