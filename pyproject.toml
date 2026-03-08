@@ -39,7 +39,8 @@ nbformat = "^5.10.4"
 noisereduce = "^3.0.3"
 nicegui = "^3.8.0"
 psutil = "^6.0.0"
-pynvml = "^13.0.1"
+torch = "^2.10.0"
+nvidia-ml-py = "^13.590.48"
 
 
 [tool.poetry.scripts]

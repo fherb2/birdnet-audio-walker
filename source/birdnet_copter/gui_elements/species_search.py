@@ -21,7 +21,7 @@ from typing import Callable, Optional
 
 from nicegui import ui
 
-from shared.db_queries import search_species_in_list
+from ..db_queries import search_species_in_list
 
 
 class SpeciesSearch:

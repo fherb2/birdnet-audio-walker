@@ -5,50 +5,11 @@ Detects GPU (NVIDIA) and CPU/RAM capabilities at startup.
 Results are stored in HardwareInfo and attached to AppState.
 """
 
-import ctypes
-import ctypes.util
 from dataclasses import dataclass
 from typing import Optional
 
 import psutil
 from loguru import logger
-
-
-# ---------------------------------------------------------------------------
-# CUDA device properties struct (subset of cudaDeviceProp)
-# Only the fields we actually read are listed; the struct must be large enough
-# to hold the full cudaDeviceProp layout (>= 256 bytes covers all CUDA versions).
-# ---------------------------------------------------------------------------
-
-class _CudaDeviceProp(ctypes.Structure):
-    _fields_ = [
-        ("name",                       ctypes.c_char * 256),
-        ("uuid",                       ctypes.c_byte  * 16),
-        ("luid",                       ctypes.c_byte  * 8),
-        ("luidDeviceNodeMask",         ctypes.c_uint),
-        ("totalGlobalMem",             ctypes.c_size_t),
-        ("sharedMemPerBlock",          ctypes.c_size_t),
-        ("regsPerBlock",               ctypes.c_int),
-        ("warpSize",                   ctypes.c_int),
-        ("memPitch",                   ctypes.c_size_t),
-        ("maxThreadsPerBlock",         ctypes.c_int),
-        ("maxThreadsDim",              ctypes.c_int   * 3),
-        ("maxGridSize",                ctypes.c_int   * 3),
-        ("clockRate",                  ctypes.c_int),
-        ("totalConstMem",              ctypes.c_size_t),
-        ("major",                      ctypes.c_int),   # compute capability major
-        ("minor",                      ctypes.c_int),   # compute capability minor
-        ("textureAlignment",           ctypes.c_size_t),
-        ("texturePitchAlignment",      ctypes.c_size_t),
-        ("deviceOverlap",              ctypes.c_int),
-        ("multiProcessorCount",        ctypes.c_int),   # SM count  ← we need this
-        ("kernelExecTimeoutEnabled",   ctypes.c_int),
-        ("integrated",                 ctypes.c_int),
-        ("canMapHostMemory",           ctypes.c_int),
-        ("computeMode",                ctypes.c_int),
-        # Pad to 1024 bytes so the struct is large enough for all CUDA versions
-        ("_pad",                       ctypes.c_byte  * 600),
-    ]
 
 
 # ---------------------------------------------------------------------------
@@ -114,52 +75,37 @@ class HardwareInfo:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _load_libcuda() -> Optional[ctypes.CDLL]:
-    """Try to load libcuda.so (Linux) or nvcuda.dll (Windows)."""
-    for name in ("cuda", "nvcuda"):
-        path = ctypes.util.find_library(name)
-        if path:
-            try:
-                return ctypes.CDLL(path)
-            except OSError:
-                pass
-    return None
-
-
-def _get_sm_info(lib: ctypes.CDLL, device_index: int = 0) -> tuple[Optional[int], Optional[int]]:
+def _get_sm_info(device_index: int = 0) -> tuple[Optional[int], Optional[int]]:
     """
-    Query SM count and cores-per-SM via cudaGetDeviceProperties.
+    Query SM count and cores-per-SM via torch.cuda.
 
     Returns:
         (sm_count, cores_per_sm) – both None on failure
     """
     try:
-        prop = _CudaDeviceProp()
-        ret = lib.cudaGetDeviceProperties(ctypes.byref(prop), ctypes.c_int(device_index))
-        if ret != 0:
-            logger.warning(f"cudaGetDeviceProperties returned error code {ret}")
+        import torch
+        if not torch.cuda.is_available():
             return None, None
 
-        sm_count = prop.multiProcessorCount
-        cc = (prop.major, prop.minor)
+        props = torch.cuda.get_device_properties(device_index)
+        sm_count = props.multi_processor_count
+        cc = (props.major, props.minor)
 
-        # Exact match first, then major-only fallback
         cores_per_sm = _CORES_PER_SM.get(cc)
         if cores_per_sm is None:
-            cores_per_sm = _CORES_PER_SM.get((prop.major, 0))
-
+            cores_per_sm = _CORES_PER_SM.get((props.major, 0))
         if cores_per_sm is None:
             logger.warning(
-                f"Unknown compute capability {prop.major}.{prop.minor}, "
+                f"Unknown compute capability {props.major}.{props.minor}, "
                 "cores_per_sm set to None"
             )
 
         return sm_count, cores_per_sm
 
     except Exception as e:
-        logger.warning(f"Failed to query cudaGetDeviceProperties: {e}")
+        logger.warning(f"Failed to query SM info via torch.cuda: {e}")
         return None, None
-
+    
 
 def _get_gpu_info() -> tuple[bool, Optional[str], Optional[float], Optional[int], Optional[int], Optional[int]]:
     """
@@ -189,18 +135,11 @@ def _get_gpu_info() -> tuple[bool, Optional[str], Optional[float], Optional[int]
 
         pynvml.nvmlShutdown()
 
-        # SM info via libcuda
-        sm_count: Optional[int] = None
-        cores_per_sm: Optional[int] = None
+        # SM info via torch.cuda
+        sm_count, cores_per_sm = _get_sm_info(0)
         shaders: Optional[int] = None
-
-        lib = _load_libcuda()
-        if lib is not None:
-            sm_count, cores_per_sm = _get_sm_info(lib)
-            if sm_count is not None and cores_per_sm is not None:
-                shaders = sm_count * cores_per_sm
-        else:
-            logger.warning("libcuda not found – sm_count and cores_per_sm unavailable")
+        if sm_count is not None and cores_per_sm is not None:
+            shaders = sm_count * cores_per_sm
 
         return True, name, vram_gb, sm_count, cores_per_sm, shaders
 

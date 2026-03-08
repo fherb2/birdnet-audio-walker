@@ -11,7 +11,7 @@ from pydub import AudioSegment
 from loguru import logger
 from num2words import num2words
 
-from shared.audio_extract import extract_snippet, calculate_snippet_offsets
+from .audio_extract import extract_snippet, calculate_snippet_offsets
 from .tts import generate_tts
 
 # Additional imports for audio processing

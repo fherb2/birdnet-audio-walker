@@ -31,7 +31,6 @@ from datetime import datetime
 import h5py
 
 from .config import (
-    DEVICE,
     OVERLAP_DURATION_S,
     BATCH_SIZE,
     TOP_K,
@@ -64,7 +63,8 @@ def analyze_file(
     latitude: float,
     longitude: float,
     timestamp: datetime,
-    min_confidence: float = 0.25
+    min_confidence: float = 0.25,
+    device: str = 'cpu',
 ) -> list[dict]:
     """
     Analyze entire audio file with BirdNET.
@@ -92,7 +92,7 @@ def analyze_file(
     # BirdNET handles segmentation internally with overlap
     result = model.predict(
         str(file_path),
-        device=DEVICE,
+        device=device,
         overlap_duration_s=OVERLAP_DURATION_S,
         batch_size=BATCH_SIZE,
         top_k=TOP_K,
@@ -139,8 +139,9 @@ def analyze_file(
 def extract_embeddings(
     file_path: str | Path,
     overlap_duration_s: float = 0.0,
-    batch_size: int = 32
-):  # WICHTIG: Return-Type geändert!
+    batch_size: int = 32,
+    device: str = 'cpu',
+):
     """
     Extract embeddings for entire audio file using BirdNET.
     
@@ -169,7 +170,7 @@ def extract_embeddings(
     # Call BirdNET encode method
     result = model.encode(
         str(file_path),
-        device=DEVICE,
+        device=device,
         batch_size=batch_size,
         overlap_duration_s=overlap_duration_s
     )

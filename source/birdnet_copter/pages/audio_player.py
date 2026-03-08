@@ -28,7 +28,7 @@ from nicegui import ui, app as nicegui_app, context as _ctx
 from ..app_state import AppState
 from ..pages.layout import create_layout
 from ..gui_elements.species_search import SpeciesSearch
-from shared.db_queries import (
+from ..db_queries import (
     get_analysis_config,
     query_detections,
     get_recording_date_range,

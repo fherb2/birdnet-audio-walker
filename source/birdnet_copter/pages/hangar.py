@@ -40,7 +40,7 @@ async def hangar() -> None:
     # Section 1: Host Information
     # -----------------------------------------------------------------------
     with ui.card().classes('w-full q-mb-md'):
-        ui.label('🖥 Host Information').classes('text-h6 q-mb-xs')
+        ui.label('🚁 Copter – Technical data').classes('text-h6 q-mb-xs')
         hw = state.hw_info
 
         if hw is None:
@@ -78,34 +78,28 @@ async def hangar() -> None:
                     f'{hw.cpu_count_for_inference}{note}'
                 ).classes('text-body2' + (' text-orange-7' if hw.sleep_flag else ''))
 
-    # -----------------------------------------------------------------------
+# -----------------------------------------------------------------------
     # Section 2: Root Path
     # -----------------------------------------------------------------------
     with ui.card().classes('w-full q-mb-md'):
-        ui.label('📁 Root Path / Global DB Path').classes('text-h6 q-mb-xs')
-
+        ui.label('🌍 Flying Area: Root Path / Global DB Path').classes('text-h6 q-mb-xs')
         root_label = ui.label(str(state.root_path)).classes('text-body2 text-grey-8 q-mb-xs')
+        root_dialog_btn = ui.button('📁 Change', on_click=lambda: asyncio.create_task(_open_root_dialog())).props('no-caps')
 
-        async def _open_root_dialog() -> None:
-            root_dialog.open()
-
-        ui.button('📁 Change', on_click=_open_root_dialog).props('no-caps')
-
-    # --- Root Path Dialog ---
     with ui.dialog() as root_dialog:
-        with ui.card().classes('w-96'):
-            ui.label('Select Root Path').classes('text-h6 q-mb-sm')
+        with ui.card().classes('w-96') as root_dialog_card:
+            pass
 
+    async def _open_root_dialog() -> None:
+        root_dialog_card.clear()
+        with root_dialog_card:
+            ui.label('Select Root Path').classes('text-h6 q-mb-sm')
             selected_path: dict = {'value': state.root_path}
 
             def _on_folder_select(p: Path) -> None:
                 selected_path['value'] = p
 
-            FolderTree(
-                root_path=state.root_path,
-                on_select=_on_folder_select,
-                show_extras=False,
-            )
+            FolderTree(root_path=state.root_path, on_select=_on_folder_select, show_extras=False)
 
             with ui.row().classes('q-mt-sm gap-2 justify-end w-full'):
                 ui.button('Cancel', on_click=root_dialog.close).props('no-caps flat')
@@ -117,26 +111,23 @@ async def hangar() -> None:
                         return
                     state.root_path = new_root
                     root_label.set_text(str(new_root))
-                    # Re-scan for databases
                     loop = asyncio.get_event_loop()
-                    dbs = await loop.run_in_executor(
-                        None, find_databases_recursive, new_root
-                    )
+                    dbs = await loop.run_in_executor(None, find_databases_recursive, new_root)
                     state.available_dbs = dbs
-                    if dbs:
-                        state.active_db = dbs[0]
-                    else:
-                        state.active_db = None
+                    state.active_db = dbs[0] if dbs else None
                     logger.info(f'Root path changed to: {new_root}')
                     root_dialog.close()
 
                 ui.button('✔ Confirm', on_click=_confirm_root).props('no-caps color=primary')
 
+        root_dialog.open()
+
+
     # -----------------------------------------------------------------------
     # Section 3: Inference Configuration
     # -----------------------------------------------------------------------
     with ui.card().classes('w-full q-mb-md'):
-        ui.label('⚙ Inference Configuration').classes('text-h6 q-mb-xs')
+        ui.label('🚁 Scout flight: Inference Configuration').classes('text-h6 q-mb-xs')
 
         hw = state.hw_info
         gpu_available = hw is not None and hw.has_nvidia_gpu
@@ -157,7 +148,7 @@ async def hangar() -> None:
 
         with ui.column().classes('gap-0'):
             ui.switch(
-                'Use Embedding Vectors',
+                'Include Embedding Vectors Of Detections',
                 value=state.use_embeddings,
                 on_change=lambda e: _on_embeddings_change(e.value),
             )
@@ -170,38 +161,24 @@ async def hangar() -> None:
             state.use_embeddings = val
             logger.debug(f'use_embeddings set to {val}')
 
-    # -----------------------------------------------------------------------
+# -----------------------------------------------------------------------
     # Section 4: Global Index
     # -----------------------------------------------------------------------
     with ui.card().classes('w-full q-mb-md'):
         ui.label('🌐 Global Index').classes('text-h6 q-mb-xs')
 
-        global_index_label = ui.label(
-            str(state.global_index_path) if state.global_index_path else str(state.root_path)
-        ).classes('text-body2 text-grey-8')
-
-        global_path_row = ui.row().classes('items-center gap-3 q-mt-xs')
-
-        with global_path_row:
-            global_path_display = ui.label(
-                str(state.global_index_path or state.root_path)
-            ).classes('text-body2 text-grey-8 flex-grow')
-
-            async def _open_global_dialog() -> None:
-                global_dialog.open()
-
-            change_global_btn = ui.button(
-                '📁 Change', on_click=_open_global_dialog
-            ).props('no-caps')
-
-        # Toggle
         use_global_toggle = ui.switch(
             'Create / Use Global Index',
             value=state.global_index_path is not None,
             on_change=lambda e: _on_global_toggle(e.value),
         )
-        # Move toggle before path row visually
-        use_global_toggle.move(global_path_row.parent_slot.parent, target_index=0)
+
+        global_path_row = ui.row().classes('items-center gap-3 q-mt-xs')
+        with global_path_row:
+            global_path_display = ui.label(
+                str(state.global_index_path or state.root_path)
+            ).classes('text-body2 text-grey-8 flex-grow')
+            ui.button('📁 Change', on_click=lambda: asyncio.create_task(_open_global_dialog())).props('no-caps')
 
         ui.label(
             'A global index combines all local databases into one overarching database.'
@@ -212,33 +189,27 @@ async def hangar() -> None:
             if not val:
                 state.global_index_path = None
                 state.active_db_is_global = False
-                logger.debug('Global index disabled')
             else:
                 if state.global_index_path is None:
                     state.global_index_path = state.root_path
                 global_path_display.set_text(str(state.global_index_path))
-                logger.debug(f'Global index enabled: {state.global_index_path}')
 
-        # Initial visibility
         global_path_row.set_visibility(state.global_index_path is not None)
 
-    # --- Global Index Path Dialog ---
     with ui.dialog() as global_dialog:
-        with ui.card().classes('w-96'):
-            ui.label('Select Global Index Path').classes('text-h6 q-mb-sm')
+        with ui.card().classes('w-96') as global_dialog_card:
+            pass
 
-            selected_global: dict = {
-                'value': state.global_index_path or state.root_path
-            }
+    async def _open_global_dialog() -> None:
+        global_dialog_card.clear()
+        with global_dialog_card:
+            ui.label('Select Global Index Path').classes('text-h6 q-mb-sm')
+            selected_global: dict = {'value': state.global_index_path or state.root_path}
 
             def _on_global_select(p: Path) -> None:
                 selected_global['value'] = p
 
-            FolderTree(
-                root_path=state.global_index_path or state.root_path,
-                on_select=_on_global_select,
-                show_extras=False,
-            )
+            FolderTree(root_path=state.global_index_path or state.root_path, on_select=_on_global_select, show_extras=False)
 
             with ui.row().classes('q-mt-sm gap-2 justify-end w-full'):
                 ui.button('Cancel', on_click=global_dialog.close).props('no-caps flat')
@@ -246,9 +217,8 @@ async def hangar() -> None:
                 def _confirm_global() -> None:
                     state.global_index_path = selected_global['value']
                     global_path_display.set_text(str(state.global_index_path))
-                    logger.info(f'Global index path set to: {state.global_index_path}')
                     global_dialog.close()
 
-                ui.button(
-                    '✔ Confirm', on_click=_confirm_global
-                ).props('no-caps color=primary')
+                ui.button('✔ Confirm', on_click=_confirm_global).props('no-caps color=primary')
+
+        global_dialog.open()
