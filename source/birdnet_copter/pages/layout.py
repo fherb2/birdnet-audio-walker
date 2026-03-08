@@ -109,8 +109,11 @@ def create_layout(app_state: AppState) -> ui.left_drawer:
 
             # Timer updates spinner visibility every 500 ms
             def _update_spinner():
-                running = app_state.audio_generation_running
-                spinner_row.set_visibility(running)
+                try:
+                    running = app_state.audio_generation_running
+                    spinner_row.set_visibility(running)
+                except Exception:
+                    pass
 
             t_spinner = ui.timer(0.5, _update_spinner)
 
@@ -119,8 +122,11 @@ def create_layout(app_state: AppState) -> ui.left_drawer:
     # (e.g. after a DB switch on the overview page)
     # ------------------------------------------------------------------
     def _update_paths():
-        root_label.set_text(str(app_state.root_path))
-        db_label.set_text(_relative_db_label(app_state))
+        try:
+            root_label.set_text(str(app_state.root_path))
+            db_label.set_text(_relative_db_label(app_state))
+        except Exception:
+            pass
 
     t_paths = ui.timer(1.0, _update_paths)
 
