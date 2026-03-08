@@ -292,6 +292,7 @@ def _process_folder(
                     longitude=meta.get('gps_lon', 13.7372),
                     timestamp=meta['timestamp_utc'],
                     min_confidence=job.min_conf,
+                    device=device,
                 )
 
             # --- embeddings (optional) ---
@@ -301,6 +302,7 @@ def _process_folder(
                         file_path,
                         overlap_duration_s=OVERLAP_DURATION_S,
                         batch_size=BATCH_SIZE,
+                        device=device,
                     )
                     emb_array       = emb_result.embeddings[0]
                     segment_times   = calculate_segment_times(

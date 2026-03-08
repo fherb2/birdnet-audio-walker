@@ -25,7 +25,7 @@ from ..app_state import AppState
 from ..pages.layout import create_layout
 from ..gui_elements.species_search import SpeciesSearch
 from ..player import AudioPlayer
-from shared.db_queries import query_detections, get_recording_date_range
+from ..db_queries import query_detections, get_recording_date_range
 
 import uuid
 from nicegui import app as _nicegui_app

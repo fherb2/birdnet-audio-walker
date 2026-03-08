@@ -47,7 +47,7 @@ async def scouting_flight() -> None:
     bundle = nicegui_app.state.bundle
     create_layout(state)
 
-    ui.label('🔭 Scouting Flight').classes('text-h5 q-mt-md q-mb-sm')
+    ui.label('🚁 Scouting Flight').classes('text-h5 q-mt-md q-mb-sm')
 
     # Page-local state
     page: dict = {
@@ -59,31 +59,90 @@ async def scouting_flight() -> None:
     # Section 1: Folder View
     # -----------------------------------------------------------------------
     ui.label('📂 Folder Selection').classes('text-h6 q-mb-xs')
+    
+    ui.label(
+        'You can add folders for the scouting flight by the + symbol in the list. '
+        'Go deeper into the list (double click) if your folder structure has multiple levels.'
+    ).classes('text-caption text-grey-6 q-mb-xs')
+    
+    def _on_scout_everything() -> None:
+        """Add root_path and all subfolders with WAV files to the job list."""
+        root = state.root_path
+        candidates = [root] + sorted(
+            p for p in root.rglob('*') if p.is_dir()
+        )
+        folders_to_add = [
+            f for f in candidates
+            if (any(f.glob('*.wav')) or any(f.glob('*.WAV')))
+            and f not in page['added_folders']
+        ]
+        if not folders_to_add:
+            ui.notify('All folders already in scout list.', type='warning')
+            return
+
+        from ..job_queue import progress_msg
+        jobs: list = list(bundle.shared_state.get('jobs', []))
+        pending: list = list(bundle.shared_state.get('pending_jobs', []))
+
+        for f in folders_to_add:
+            page['added_folders'].add(f)
+            job = ScanJob(
+                folder_path=f,
+                scan_embeddings=state.use_embeddings,
+                rescan_species=False,
+                min_conf=0.4,
+            )
+            jobs.append(progress_msg(job))
+            pending.append(job)
+
+        bundle.shared_state['jobs'] = jobs
+        bundle.shared_state['pending_jobs'] = pending
+        ui.notify(f'Added {len(folders_to_add)} folder(s) from root', type='positive')
+        _refresh_job_table()
+        
+    ui.button('🌍 Scout everything', on_click=_on_scout_everything).props('no-caps')
+
+    recursive_toggle = ui.checkbox('Include subfolders into your selection', value=False)
 
     def _add_folder_to_jobs(folder: Path) -> None:
-        """Add a folder as a new ScanJob (once per session)."""
-        if folder in page['added_folders']:
-            ui.notify(f'Already in scout list: {folder.name}', type='warning')
+        """Add folder (and subfolders if recursive) as ScanJob(s)."""
+        folders_to_add: list[Path] = []
+
+        if recursive_toggle.value:
+            # Collect folder itself + all subfolders containing WAV files
+            candidates = [folder] + sorted(
+                p for p in folder.rglob('*') if p.is_dir()
+            )
+            for f in candidates:
+                has_wav = any(f.glob('*.wav')) or any(f.glob('*.WAV'))
+                if has_wav and f not in page['added_folders']:
+                    folders_to_add.append(f)
+        else:
+            if folder not in page['added_folders']:
+                folders_to_add.append(folder)
+
+        if not folders_to_add:
+            ui.notify('All matching folders already in scout list.', type='warning')
             return
-        page['added_folders'].add(folder)
-        job = ScanJob(
-            folder_path=folder,
-            scan_embeddings=state.use_embeddings,
-            rescan_species=False,
-            min_conf=0.4,
-        )
-        # Register in shared_state so GUI sees it immediately;
-        # actual queue send happens when ▶ Start is clicked.
-        jobs: list = list(bundle.shared_state.get('jobs', []))
+
         from ..job_queue import progress_msg
-        jobs.append(progress_msg(job))
-        bundle.shared_state['jobs'] = jobs
-        # Keep the ScanJob object for later sending
+        jobs: list = list(bundle.shared_state.get('jobs', []))
         pending: list = list(bundle.shared_state.get('pending_jobs', []))
-        pending.append(job)
+
+        for f in folders_to_add:
+            page['added_folders'].add(f)
+            job = ScanJob(
+                folder_path=f,
+                scan_embeddings=state.use_embeddings,
+                rescan_species=False,
+                min_conf=0.4,
+            )
+            jobs.append(progress_msg(job))
+            pending.append(job)
+
+        bundle.shared_state['jobs'] = jobs
         bundle.shared_state['pending_jobs'] = pending
-        logger.debug(f'Folder staged for scouting: {folder}')
-        ui.notify(f'Added: {folder.name}', type='positive')
+        ui.notify(f'Added {len(folders_to_add)} folder(s)', type='positive')
         _refresh_job_table()
 
     FolderTree(
@@ -96,10 +155,102 @@ async def scouting_flight() -> None:
 
     ui.separator().classes('q-my-md')
 
+
     # -----------------------------------------------------------------------
-    # Section 2: Job Controls
+    # Section 2: Job List
     # -----------------------------------------------------------------------
-    ui.label('🎛 Controls').classes('text-h6 q-mb-xs')
+    ui.label('📋 Job List').classes('text-h6 q-mb-xs')
+
+    STATUS_ICONS = {
+        'pending': '⏳',
+        'running':  '🚁',
+        'done':    '✅',
+        'error':   '❌',
+        'skipped': '⏭',
+        'waiting':      '⏸',
+        'wait_pending': '⏳',
+    }
+
+    job_table_container = ui.column().classes('w-full gap-1')
+    
+    def _remove_job(job_id: str) -> None:
+        """Remove a pending job from shared_state and pending_jobs list."""
+        # Find folder path before removing
+        jobs: list = list(bundle.shared_state.get('jobs', []))
+        removed = next((j for j in jobs if j.get('job_id') == job_id), None)
+
+        # Remove from shared_state['jobs']
+        bundle.shared_state['jobs'] = [j for j in jobs if j.get('job_id') != job_id]
+
+        # Remove from pending_jobs
+        pending: list = list(bundle.shared_state.get('pending_jobs', []))
+        bundle.shared_state['pending_jobs'] = [
+            j for j in pending if j.job_id != job_id
+        ]
+
+        # Allow folder to be re-added
+        if removed:
+            folder = Path(removed.get('folder_path', ''))
+            page['added_folders'].discard(folder)
+
+        _refresh_job_table()
+
+    def _refresh_job_table() -> None:
+        jobs: list = list(bundle.shared_state.get('jobs', []))
+        job_table_container.clear()
+        if not jobs:
+            with job_table_container:
+                ui.label('No jobs yet.').classes('text-caption text-grey-6')
+            return
+
+        with job_table_container:
+            with ui.row().classes(
+                'w-full px-2 py-1 bg-grey-2 text-caption font-bold gap-2 items-center'
+            ):
+                ui.label('#').classes('w-6')
+                ui.label('Folder').classes('w-48')
+                ui.label('Status').classes('w-28')
+                ui.label('Progress').classes('w-16')
+                ui.label('Current file').classes('flex-grow')
+                ui.label('').classes('w-8')
+
+            for idx, j in enumerate(jobs):
+                status = j.get('status', 'pending')
+                icon = STATUS_ICONS.get(status, '?')
+                total = j.get('files_total', 0)
+                done = j.get('files_done', 0)
+                progress = f'{done}/{total}' if total > 0 else '–'
+
+                with ui.row().classes(
+                    'w-full px-2 py-1 gap-2 items-center '
+                    + ('bg-grey-1' if idx % 2 == 0 else '')
+                ):
+                    ui.label(str(idx + 1)).classes('w-6 text-caption')
+                    ui.label(
+                        Path(j.get('folder_path', '')).name
+                    ).classes('w-48 text-body2').tooltip(j.get('folder_path', ''))
+                    ui.label(f'{icon} {status}').classes('w-28 text-caption')
+                    ui.label(progress).classes('w-16 text-caption')
+                    ui.label(j.get('current_file', '')).classes(
+                        'flex-grow text-caption text-grey-6'
+                    )
+                    if status == 'pending':
+                        job_id = j.get('job_id')
+                        ui.button(
+                            icon='close',
+                            on_click=lambda jid=job_id: _remove_job(jid),
+                        ).props('flat dense round size=xs color=negative')
+                    else:
+                        ui.label('').classes('w-8')
+
+    _refresh_job_table()
+
+    ui.separator().classes('q-my-md')
+
+    # -----------------------------------------------------------------------
+    # Section 3: Job Controls
+    # -----------------------------------------------------------------------
+    ui.label('🎛 Cockpit Controls').classes('text-h6 q-mb-xs')
 
     with ui.row().classes('gap-2 items-center q-mb-sm flex-wrap'):
 
@@ -108,7 +259,7 @@ async def scouting_flight() -> None:
             if not page['walker_started']:
                 start_walker_process(bundle)
                 page['walker_started'] = True
-                bundle.shared_state['walker_status'] = 'running'
+                bundle.shared_state['walker_status'] = 'flying'
 
             # Send all pending (not-yet-queued) jobs to the walker
             pending: list = list(bundle.shared_state.get('pending_jobs', []))
@@ -118,7 +269,7 @@ async def scouting_flight() -> None:
             bundle.shared_state['pending_jobs'] = []
             _update_control_buttons()
 
-        start_btn = ui.button('▶ Start', on_click=_on_start).props('no-caps color=positive')
+        start_btn = ui.button('▶ Take off', on_click=_on_start).props('no-caps color=positive')
 
         def _on_wait() -> None:
             send_control(bundle, SIGNAL_WAIT)
@@ -143,41 +294,13 @@ async def scouting_flight() -> None:
             '⏹ Stop after current', on_click=_on_stop
         ).props('no-caps color=negative')
 
-        async def _on_scout_everything() -> None:
-            """Add single job for entire tree under root_path."""
-            root = state.root_path
-            if root in page['added_folders']:
-                ui.notify('Root folder already in scout list.', type='warning')
-                return
-            page['added_folders'].add(root)
-            job = ScanJob(
-                folder_path=root,
-                scan_embeddings=state.use_embeddings,
-                rescan_species=False,
-                min_conf=0.4,
-            )
-            from ..job_queue import progress_msg
-            jobs: list = list(bundle.shared_state.get('jobs', []))
-            jobs.append(progress_msg(job))
-            bundle.shared_state['jobs'] = jobs
-            pending: list = list(bundle.shared_state.get('pending_jobs', []))
-            pending.append(job)
-            bundle.shared_state['pending_jobs'] = pending
-            logger.debug(f'Scout everything job staged: {root}')
-            ui.notify(f'Added root folder: {root.name}', type='positive')
-            _refresh_job_table()
-
-        ui.button(
-            '🔭 Scout everything', on_click=_on_scout_everything
-        ).props('no-caps')
-
     def _update_control_buttons() -> None:
         """En-/disable buttons based on walker_status."""
         ws = bundle.shared_state.get('walker_status', 'idle')
         # Start: always available (re-flushes pending jobs)
         start_btn.enable()
         # Wait: only when running
-        if ws == 'running':
+        if ws == 'flying':
             wait_btn.enable()
         else:
             wait_btn.disable()
@@ -187,7 +310,7 @@ async def scouting_flight() -> None:
         else:
             resume_btn.disable()
         # Stop: when running or wait_pending or waiting
-        if ws in ('running', 'wait_pending', 'waiting'):
+        if ws in ('flying', 'wait_pending', 'waiting'):
             stop_btn.enable()
         else:
             stop_btn.disable()
@@ -196,82 +319,30 @@ async def scouting_flight() -> None:
 
     ui.separator().classes('q-my-md')
 
-    # -----------------------------------------------------------------------
-    # Section 3: Job List
-    # -----------------------------------------------------------------------
-    ui.label('📋 Job List').classes('text-h6 q-mb-xs')
 
-    STATUS_ICONS = {
-        'pending': '⏳',
-        'running': '🔄',
-        'done':    '✅',
-        'error':   '❌',
-        'skipped': '⏭',
-    }
-
-    job_table_container = ui.column().classes('w-full gap-1')
-
-    def _refresh_job_table() -> None:
-        jobs: list = list(bundle.shared_state.get('jobs', []))
-        job_table_container.clear()
-        if not jobs:
-            with job_table_container:
-                ui.label('No jobs yet.').classes('text-caption text-grey-6')
-            return
-
-        rows = []
-        for j in jobs:
-            status = j.get('status', 'pending')
-            icon = STATUS_ICONS.get(status, '?')
-            total = j.get('files_total', 0)
-            done = j.get('files_done', 0)
-            progress = f'{done}/{total}' if total > 0 else '–'
-            rows.append({
-                '#':           str(len(rows) + 1),
-                'Folder':      Path(j.get('folder_path', '')).name,
-                'Status':      f'{icon} {status}',
-                'Progress':    progress,
-                'Current file': j.get('current_file', ''),
-                'Error':       j.get('error_msg', ''),
-            })
-
-        cols = [
-            {'name': k, 'label': k, 'field': k, 'align': 'left'}
-            for k in rows[0]
-        ]
-        with job_table_container:
-            ui.table(
-                columns=cols,
-                rows=rows,
-                pagination=0,
-            ).classes('w-full').props('flat bordered dense')
-
-    _refresh_job_table()
-
-    ui.separator().classes('q-my-md')
 
     # -----------------------------------------------------------------------
     # Section 4: Status Line
     # -----------------------------------------------------------------------
-    status_line = ui.label('Walker: 💤 idle').classes('text-body2 text-grey-7')
+    status_line = ui.label('Scout flight: 💤 idle').classes('text-body2 text-grey-7')
 
     def _build_status_line() -> str:
         ws = bundle.shared_state.get('walker_status', 'idle')
         jobs: list = list(bundle.shared_state.get('jobs', []))
 
         if ws == 'idle':
-            return 'Walker: 💤 idle'
+            return 'Scout flight: 💤 idle'
 
         if ws == 'wait_pending':
-            return 'Walker: ⏳ Wait pending (after current batch)'
+            return 'Scout flight: ⏳ Wait pending (after current batch)'
 
         if ws == 'waiting':
             pending_count = sum(
                 1 for j in jobs if j.get('status') == 'pending'
             )
-            return f'Walker: ⏸ Waiting  |  {pending_count} job(s) in queue'
+            return f'Scout flight: ⏸ Waiting  |  {pending_count} job(s) in queue'
 
-        if ws == 'running':
+        if ws in ('running', 'flying'):
             running_jobs = [j for j in jobs if j.get('status') == 'running']
             total_jobs = len(jobs)
             done_jobs = sum(1 for j in jobs if j.get('status') == 'done')
@@ -283,13 +354,13 @@ async def scouting_flight() -> None:
                 done_f = rj.get('files_done', 0)
                 cur = rj.get('current_file', '')
                 return (
-                    f'Walker: 🔄 running  |  '
+                    f'Scout flight: 🚁 flying  |  '
                     f'Job {job_idx}/{total_jobs}  |  '
                     f'File {done_f}/{total_f}: {cur}'
                 )
-            return f'Walker: 🔄 running  |  Job {job_idx}/{total_jobs}'
+            return f'Scout flight: 🚁 flying  |  Job {job_idx}/{total_jobs}'
 
-        return f'Walker: {ws}'
+        return f'Scout flight: {ws}'
 
     # -----------------------------------------------------------------------
     # ui.timer: refresh table + status line + buttons
