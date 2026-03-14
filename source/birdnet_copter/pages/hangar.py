@@ -17,6 +17,8 @@ from nicegui import ui, app as nicegui_app
 
 from ..app_state import AppState
 from ..pages.layout import create_layout
+from ..gui_elements.page_header import page_header
+from ..gui_elements.section_card import section_card
 from ..gui_elements.folder_tree import FolderTree
 from ..utils import find_databases_recursive
 
@@ -34,13 +36,12 @@ async def hangar() -> None:
     state = _get_state()
     create_layout(state)
 
-    ui.label('🛠 Hangar').classes('text-h5 q-mt-md q-mb-sm')
+    page_header('🛠', 'Hangar', 'hangar')
 
     # -----------------------------------------------------------------------
     # Section 1: Host Information
     # -----------------------------------------------------------------------
-    with ui.card().classes('w-full q-mb-md'):
-        ui.label('🚁 Copter – Technical data').classes('text-h6 q-mb-xs')
+    with section_card('🚁', 'Copter – Technical data', 'hangar_host'):
         hw = state.hw_info
 
         if hw is None:
@@ -81,8 +82,7 @@ async def hangar() -> None:
     # -----------------------------------------------------------------------
     # Section 2: Root Path
     # -----------------------------------------------------------------------
-    with ui.card().classes('w-full q-mb-md'):
-        ui.label('🌍 Flying Area: Root Path / Global DB Path').classes('text-h6 q-mb-xs')
+    with section_card('🌍', 'Flying Area: Root Path / Global DB Path', 'hangar_root_path'):
         root_label = ui.label(str(state.root_path)).classes('text-body2 text-grey-10 q-mb-xs')
         root_dialog_btn = ui.button('📁 Change', on_click=lambda: asyncio.create_task(_open_root_dialog())).props('no-caps')
 
@@ -126,8 +126,7 @@ async def hangar() -> None:
     # -----------------------------------------------------------------------
     # Section 3: Inference Configuration
     # -----------------------------------------------------------------------
-    with ui.card().classes('w-full q-mb-md'):
-        ui.label('⚙️ GPU Processing').classes('text-h6 q-mb-xs')
+    with section_card('⚙️', 'GPU Processing', 'hangar_gpu'):
 
         hw = state.hw_info
         gpu_available = hw is not None and hw.has_nvidia_gpu
@@ -149,8 +148,7 @@ async def hangar() -> None:
     # -----------------------------------------------------------------------
     # Section 4: Global Index
     # -----------------------------------------------------------------------
-    with ui.card().classes('w-full q-mb-md'):
-        ui.label('🌐 Global Index').classes('text-h6 q-mb-xs')
+    with section_card('🌐', 'Global Index', 'hangar_global_index'):
 
         use_global_toggle = ui.switch(
             'Create / Use Global Index',

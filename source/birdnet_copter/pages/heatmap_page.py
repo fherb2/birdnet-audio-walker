@@ -23,6 +23,8 @@ from nicegui import ui, app as nicegui_app, context
 
 from ..app_state import AppState
 from ..pages.layout import create_layout
+from ..gui_elements.page_header import page_header
+from ..gui_elements.section_card import section_card
 from ..gui_elements.species_search import SpeciesSearch
 from ..player import AudioPlayer
 from ..db_queries import query_detections, get_recording_date_range
@@ -290,6 +292,7 @@ def build_echart_options(
 async def heatmap_page() -> None:
     state = _get_state()
     create_layout(state)
+    page_header('🌡', 'Date-Time-Map', 'heatmap')
 
     if state.active_db is None or not state.active_db.exists():
         ui.label("⚠️ No database selected. Please open a database first.") \
@@ -318,228 +321,227 @@ async def heatmap_page() -> None:
     # ------------------------------------------------------------------
     # Section: Filters
     # ------------------------------------------------------------------
-    ui.label("🔍 Search Filters").classes("text-h6 q-mt-md q-mb-xs")
+    with section_card('🔍', 'Filters', 'heatmap_filters'):
+        with ui.row().classes("w-full gap-6 q-mt-sm"):
 
-    with ui.row().classes("w-full gap-6 q-mt-sm"):
-
-        # --- Left column ---
-        with ui.column().classes("gap-3").style("min-width:280px;"):
-            species_search = SpeciesSearch(
-                db_path=state.active_db,
-                on_select=lambda s: setattr(state, "hm_filter_species", s),
-                initial_value=state.hm_filter_species,
-            )
-
-            def _on_conf_change(e):
-                val = e.args if isinstance(e.args, str) else e.args.get('label', 'All')
-                state.hm_filter_confidence = None if val == "All" else int(val.rstrip("%")) / 100
-
-            conf_select = ui.select(
-                options=CONFIDENCE_OPTIONS,
-                value=(
-                    f"{int(state.hm_filter_confidence * 100)}%"
-                    if state.hm_filter_confidence is not None
-                    else CONFIDENCE_DEFAULT
-                ),
-                label="Min Confidence",
-            ).props("dense outlined").classes("w-full")
-            conf_select.on("update:modelValue", _on_conf_change)
-
-            with ui.row().classes("items-center gap-4"):
-                def _on_colormap_change(e):
-                    val = e.args['label'] if isinstance(e.args, dict) else e.args
-                    setattr(state, "hm_colormap", val)
-
-                colormap_select = ui.select(
-                    options=list(ECHARTS_COLORMAPS.keys()),
-                    value=state.hm_colormap,
-                    label="Colormap",
-                ).props("dense outlined").classes("w-44")
-                colormap_select.on("update:modelValue", _on_colormap_change)
-
-                weight_cb = ui.checkbox(
-                    "Weight by Confidence",
-                    value=state.hm_weight_confidence,
-                )
-                weight_cb.on(
-                    "update:modelValue",
-                    lambda e: setattr(state, "hm_weight_confidence", bool(e.args)),
-                )
-
-        # --- Right column ---
-        with ui.column().classes("gap-3"):
-            if state.hm_filter_date_from is None or state.hm_filter_date_to is None:
-                try:
-                    db_min, db_max = get_recording_date_range(state.active_db)
-                    if state.hm_filter_date_from is not None and hasattr(state.hm_filter_date_from, 'date'):
-                        state.hm_filter_date_from = state.hm_filter_date_from.date()
-                    if state.hm_filter_date_to is not None and hasattr(state.hm_filter_date_to, 'date'):
-                        state.hm_filter_date_to = state.hm_filter_date_to.date()
-                    state.hm_filter_date_from = state.hm_filter_date_from or db_min.date()
-                    state.hm_filter_date_to = state.hm_filter_date_to or db_max.date()
-                except Exception:
-                    state.hm_filter_date_from = state.hm_filter_date_from or date.today()
-                    state.hm_filter_date_to = state.hm_filter_date_to or date.today()
-
-            with ui.row().classes("gap-3"):
-                date_from_input = ui.input(
-                    label='Date From',
-                    value=state.hm_filter_date_from.isoformat()
-                          if state.hm_filter_date_from else '',
-                ).props('type=date outlined dense').classes('w-40')
-                date_from_input.on(
-                    'change',
-                    lambda e: setattr(
-                        state, 'hm_filter_date_from',
-                        date.fromisoformat(e.args['value']) if e.args.get('value') else None,
-                    ),
-                )
-
-                date_to_input = ui.input(
-                    label='Date To',
-                    value=state.hm_filter_date_to.isoformat()
-                          if state.hm_filter_date_to else '',
-                ).props('type=date outlined dense').classes('w-40')
-                date_to_input.on(
-                    'change',
-                    lambda e: setattr(
-                        state, 'hm_filter_date_to',
-                        date.fromisoformat(e.args['value']) if e.args.get('value') else None,
-                    ),
-                )
-
-    # ------------------------------------------------------------------
-    # Apply Filters button
-    # ------------------------------------------------------------------
-    async def _apply_filters() -> None:
-        """Query detections, aggregate, and render/update the heatmap."""
-        if state.hm_filter_date_from is None or state.hm_filter_date_to is None:
-            ui.notify("Please set a date range.", type="warning")
-            return
-        if state.hm_filter_date_from > state.hm_filter_date_to:
-            ui.notify("Date From must be ≤ Date To.", type="warning")
-            return
-
-        apply_btn.props("loading")
-        try:
-            loop = asyncio.get_event_loop()
-            detections = await loop.run_in_executor(
-                None,
-                lambda: query_detections(
+            # --- Left column ---
+            with ui.column().classes("gap-3").style("min-width:280px;"):
+                species_search = SpeciesSearch(
                     db_path=state.active_db,
-                    species=state.hm_filter_species or None,
-                    date_from=datetime.combine(state.hm_filter_date_from, dt_time(0, 0)),
-                    date_to=datetime.combine(state.hm_filter_date_to, dt_time(23, 59)),
-                    min_confidence=state.hm_filter_confidence,
-                    limit=999_999,
-                    offset=0,
-                    sort_by="time",
-                    sort_order="asc",
-                ),
+                    on_select=lambda s: setattr(state, "hm_filter_species", s),
+                    initial_value=state.hm_filter_species,
+                )
+
+                def _on_conf_change(e):
+                    val = e.args if isinstance(e.args, str) else e.args.get('label', 'All')
+                    state.hm_filter_confidence = None if val == "All" else int(val.rstrip("%")) / 100
+
+                conf_select = ui.select(
+                    options=CONFIDENCE_OPTIONS,
+                    value=(
+                        f"{int(state.hm_filter_confidence * 100)}%"
+                        if state.hm_filter_confidence is not None
+                        else CONFIDENCE_DEFAULT
+                    ),
+                    label="Min Confidence",
+                ).props("dense outlined").classes("w-full")
+                conf_select.on("update:modelValue", _on_conf_change)
+
+                with ui.row().classes("items-center gap-4"):
+                    def _on_colormap_change(e):
+                        val = e.args['label'] if isinstance(e.args, dict) else e.args
+                        setattr(state, "hm_colormap", val)
+
+                    colormap_select = ui.select(
+                        options=list(ECHARTS_COLORMAPS.keys()),
+                        value=state.hm_colormap,
+                        label="Colormap",
+                    ).props("dense outlined").classes("w-44")
+                    colormap_select.on("update:modelValue", _on_colormap_change)
+
+                    weight_cb = ui.checkbox(
+                        "Weight by Confidence",
+                        value=state.hm_weight_confidence,
+                    )
+                    weight_cb.on(
+                        "update:modelValue",
+                        lambda e: setattr(state, "hm_weight_confidence", bool(e.args)),
+                    )
+
+            # --- Right column ---
+            with ui.column().classes("gap-3"):
+                if state.hm_filter_date_from is None or state.hm_filter_date_to is None:
+                    try:
+                        db_min, db_max = get_recording_date_range(state.active_db)
+                        if state.hm_filter_date_from is not None and hasattr(state.hm_filter_date_from, 'date'):
+                            state.hm_filter_date_from = state.hm_filter_date_from.date()
+                        if state.hm_filter_date_to is not None and hasattr(state.hm_filter_date_to, 'date'):
+                            state.hm_filter_date_to = state.hm_filter_date_to.date()
+                        state.hm_filter_date_from = state.hm_filter_date_from or db_min.date()
+                        state.hm_filter_date_to = state.hm_filter_date_to or db_max.date()
+                    except Exception:
+                        state.hm_filter_date_from = state.hm_filter_date_from or date.today()
+                        state.hm_filter_date_to = state.hm_filter_date_to or date.today()
+
+                with ui.row().classes("gap-3"):
+                    date_from_input = ui.input(
+                        label='Date From',
+                        value=state.hm_filter_date_from.isoformat()
+                            if state.hm_filter_date_from else '',
+                    ).props('type=date outlined dense').classes('w-40')
+                    date_from_input.on(
+                        'change',
+                        lambda e: setattr(
+                            state, 'hm_filter_date_from',
+                            date.fromisoformat(e.args['value']) if e.args.get('value') else None,
+                        ),
+                    )
+
+                    date_to_input = ui.input(
+                        label='Date To',
+                        value=state.hm_filter_date_to.isoformat()
+                            if state.hm_filter_date_to else '',
+                    ).props('type=date outlined dense').classes('w-40')
+                    date_to_input.on(
+                        'change',
+                        lambda e: setattr(
+                            state, 'hm_filter_date_to',
+                            date.fromisoformat(e.args['value']) if e.args.get('value') else None,
+                        ),
+                    )
+
+        # ------------------------------------------------------------------
+        # Apply Filters button
+        # ------------------------------------------------------------------
+        async def _apply_filters() -> None:
+            """Query detections, aggregate, and render/update the heatmap."""
+            if state.hm_filter_date_from is None or state.hm_filter_date_to is None:
+                ui.notify("Please set a date range.", type="warning")
+                return
+            if state.hm_filter_date_from > state.hm_filter_date_to:
+                ui.notify("Date From must be ≤ Date To.", type="warning")
+                return
+
+            apply_btn.props("loading")
+            try:
+                loop = asyncio.get_event_loop()
+                detections = await loop.run_in_executor(
+                    None,
+                    lambda: query_detections(
+                        db_path=state.active_db,
+                        species=state.hm_filter_species or None,
+                        date_from=datetime.combine(state.hm_filter_date_from, dt_time(0, 0)),
+                        date_to=datetime.combine(state.hm_filter_date_to, dt_time(23, 59)),
+                        min_confidence=state.hm_filter_confidence,
+                        limit=999_999,
+                        offset=0,
+                        sort_by="time",
+                        sort_order="asc",
+                    ),
+                )
+            except Exception as exc:
+                logger.exception("Heatmap query failed")
+                ui.notify(f"Query error: {exc}", type="negative")
+                apply_btn.props(remove="loading")
+                return
+
+            if not detections:
+                ui.notify("No detections found for current filters.", type="warning")
+                apply_btn.props(remove="loading")
+                return
+
+            cells = aggregate_detections(
+                detections,
+                state.hm_weight_confidence,
+                state.hm_filter_date_from,
+                state.hm_filter_date_to,
+            )  
+            page["cells"] = cells
+
+            options = build_echart_options(
+                cells,
+                state.hm_filter_date_from,
+                state.hm_filter_date_to,
+                state.hm_colormap,
             )
-        except Exception as exc:
-            logger.exception("Heatmap query failed")
-            ui.notify(f"Query error: {exc}", type="negative")
+            # Store ordered date list for click handler
+            page["date_strs"] = options["_meta"]["date_strs"]
+
+            state.hm_aggregated_data = cells      # persist in AppState
+            state.hm_filters_applied = True
+
+            if page["chart"] is None:
+                # First render: create chart element
+                n_days = (state.hm_filter_date_to - state.hm_filter_date_from).days + 1
+                chart_w = max(n_days * HEATMAP_CELL_SIZE + 140, 400)
+                chart_h = 48 * HEATMAP_CELL_SIZE + 80
+
+                with chart_container:
+                    chart_container.clear()
+                    chart = (
+                        ui.echart(options)
+                        .style(f"width:{chart_w}px;height:{chart_h}px;")
+                            .on("click", lambda e: _handle_chart_click(e, state, page, player),
+                            args=['offsetX', 'offsetY'])
+                    )
+                    page["chart"] = chart
+            else:
+                # Update existing chart
+                page["chart"].options.update(options)
+                page["chart"].update()
+
+            export_btn.enable()
+            download_section.set_visibility(True)
             apply_btn.props(remove="loading")
-            return
+            ui.notify(f"Heatmap updated ({len(detections)} detections).", type="positive")
 
-        if not detections:
-            ui.notify("No detections found for current filters.", type="warning")
-            apply_btn.props(remove="loading")
-            return
+        apply_btn = ui.button("▶ Apply Filters", on_click=_apply_filters) \
+            .props("no-caps color=primary").classes("q-mt-sm")
 
-        cells = aggregate_detections(
-            detections,
-            state.hm_weight_confidence,
-            state.hm_filter_date_from,
-            state.hm_filter_date_to,
-        )  
-        page["cells"] = cells
+    # ------------------------------------------------------------------
+    # Chart container + Download
+    # ------------------------------------------------------------------
+    with section_card('🗺', 'Heatmap', 'heatmap_chart'):
+        chart_container = ui.column().classes("w-full q-mt-md overflow-auto")
 
-        options = build_echart_options(
-            cells,
-            state.hm_filter_date_from,
-            state.hm_filter_date_to,
-            state.hm_colormap,
-        )
-        # Store ordered date list for click handler
-        page["date_strs"] = options["_meta"]["date_strs"]
-
-        state.hm_aggregated_data = cells      # persist in AppState
-        state.hm_filters_applied = True
-
-        if page["chart"] is None:
-            # First render: create chart element
+        if state.hm_filters_applied and state.hm_aggregated_data:
+            # Re-render on page revisit without re-querying
+            page["cells"] = state.hm_aggregated_data
+            options = build_echart_options(
+                state.hm_aggregated_data,
+                state.hm_filter_date_from,
+                state.hm_filter_date_to,
+                state.hm_colormap,
+            )
+            page["date_strs"] = options["_meta"]["date_strs"]
             n_days = (state.hm_filter_date_to - state.hm_filter_date_from).days + 1
             chart_w = max(n_days * HEATMAP_CELL_SIZE + 140, 400)
             chart_h = 48 * HEATMAP_CELL_SIZE + 80
-
             with chart_container:
-                chart_container.clear()
                 chart = (
-                    ui.echart(options)
-                    .style(f"width:{chart_w}px;height:{chart_h}px;")
+                        ui.echart(options)
+                        .style(f"width:{chart_w}px;height:{chart_h}px;")
                         .on("click", lambda e: _handle_chart_click(e, state, page, player),
-                        args=['offsetX', 'offsetY'])
-                )
+                            args=['offsetX', 'offsetY'])
+                    )
                 page["chart"] = chart
-        else:
-            # Update existing chart
-            page["chart"].options.update(options)
-            page["chart"].update()
 
-        export_btn.enable()
-        download_section.set_visibility(True)
-        apply_btn.props(remove="loading")
-        ui.notify(f"Heatmap updated ({len(detections)} detections).", type="positive")
+        # ------------------------------------------------------------------
+        # CSV Export button (wired in Part 2 via _export_csv)
+        # ------------------------------------------------------------------
+        with ui.column().classes('w-full') as download_section:
+            ui.label('📥 Download').classes('text-subtitle1 q-mb-xs')
 
-    apply_btn = ui.button("▶ Apply Filters", on_click=_apply_filters) \
-        .props("no-caps color=primary").classes("q-mt-sm")
+            with ui.row().classes('gap-3 items-center q-mt-sm'):
+                export_btn = ui.button(
+                    '📥 Download CSV',
+                    on_click=lambda: _export_csv(state, page),
+                ).props('no-caps')
 
-    # ------------------------------------------------------------------
-    # Chart container (empty until first Apply)
-    # ------------------------------------------------------------------
-    chart_container = ui.column().classes("w-full q-mt-md overflow-auto")
+                ui.label("Save as PNG: Use the chart's context menu (right-click).") \
+                    .classes('text-caption text-grey-6')
 
-    if state.hm_filters_applied and state.hm_aggregated_data:
-        # Re-render on page revisit without re-querying
-        page["cells"] = state.hm_aggregated_data
-        options = build_echart_options(
-            state.hm_aggregated_data,
-            state.hm_filter_date_from,
-            state.hm_filter_date_to,
-            state.hm_colormap,
-        )
-        page["date_strs"] = options["_meta"]["date_strs"]
-        n_days = (state.hm_filter_date_to - state.hm_filter_date_from).days + 1
-        chart_w = max(n_days * HEATMAP_CELL_SIZE + 140, 400)
-        chart_h = 48 * HEATMAP_CELL_SIZE + 80
-        with chart_container:
-            chart = (
-                    ui.echart(options)
-                    .style(f"width:{chart_w}px;height:{chart_h}px;")
-                    .on("click", lambda e: _handle_chart_click(e, state, page, player),
-                        args=['offsetX', 'offsetY'])
-                )
-            page["chart"] = chart
-
-    # ------------------------------------------------------------------
-    # CSV Export button (wired in Part 2 via _export_csv)
-    # ------------------------------------------------------------------
-    with ui.column().classes('w-full') as download_section:
-        ui.separator().classes('q-my-md')
-        ui.label('📥 Download').classes('text-h6 q-mb-xs')
-
-        with ui.row().classes('gap-3 items-center q-mt-sm'):
-            export_btn = ui.button(
-                '📥 Download CSV',
-                on_click=lambda: _export_csv(state, page),
-            ).props('no-caps')
-
-            ui.label("Save as PNG: Use the chart's context menu (right-click).") \
-                .classes('text-caption text-grey-6')
-
-    download_section.set_visibility(state.hm_filters_applied)
+        download_section.set_visibility(state.hm_filters_applied)
 
     # ------------------------------------------------------------------
     # _handle_chart_click and _open_click_dialog defined in Part 2

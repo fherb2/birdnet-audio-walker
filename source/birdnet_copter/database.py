@@ -22,6 +22,7 @@ SQLite database management for BirdNET Batch Analyzer.
 
 import sqlite3
 from datetime import datetime, timedelta
+from pathlib import Path
 from loguru import logger
 import pandas as pd
 
@@ -86,10 +87,7 @@ def init_database(db_path: str):
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS processing_status (
             filename TEXT PRIMARY KEY,
-            status TEXT NOT NULL,
-            started_at TEXT,
-            completed_at TEXT,
-            error_message TEXT,
+            completed_at TEXT NOT NULL,
             FOREIGN KEY (filename) REFERENCES metadata(filename)
         )
     """)
@@ -142,11 +140,6 @@ def insert_metadata(db_path: str, metadata: dict):
             metadata.get('gain'),
             metadata.get('firmware')
         ))
-        # Set initial processing status to pending
-        cursor.execute("""
-            INSERT OR IGNORE INTO processing_status (filename, status)
-            VALUES (?, 'pending')
-        """, (metadata['filename'],))
         
         conn.commit()
         logger.debug(f"Metadata inserted for {metadata['filename']}")
@@ -207,7 +200,13 @@ def batch_insert_detections(
             
             # NEW: Get embedding index (integer) if present
             embedding_idx = detection.get('embedding_idx', None)
-            
+
+            # Replace any existing detection for the same file+segment
+            cursor.execute(
+                "DELETE FROM detections WHERE filename = ? AND segment_start_utc = ?",
+                (filename, detection_start_utc.isoformat())
+            )
+
             # Insert detection WITH embedding_idx column
             cursor.execute("""
                 INSERT INTO detections 
@@ -230,15 +229,6 @@ def batch_insert_detections(
             ))
         
         # Commit transaction
-        conn.commit()
-        
-        # Mark file as completed
-        cursor.execute("""
-            UPDATE processing_status 
-            SET status = 'completed', completed_at = ?
-            WHERE filename = ?
-        """, (datetime.now().isoformat(), filename))
-
         conn.commit()
 
         logger.debug(f"Batch inserted {len(detections)} detections for {filename}")
@@ -294,52 +284,22 @@ def create_indices(db_path: str):
         conn.close()
 
 
-def set_file_status(
-    db_path: str,
-    filename: str,
-    status: str,
-    error_message: str = None
-):
+def set_file_status(db_path: str, filename: str, status: str):
     """
-    Set processing status for a file.
-    
+    Mark a file as completed in processing_status.
+
     Args:
         db_path: Path to SQLite database
-        filename: Filename to update
-        status: One of 'pending', 'processing', 'completed', 'failed'
-        error_message: Optional error message for 'failed' status
+        filename: Filename to mark as completed
+        status: Only 'completed' is valid
     """
     conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    
     try:
-        now = datetime.now().isoformat()
-        
-        if status == 'processing':
-            cursor.execute("""
-                INSERT OR REPLACE INTO processing_status 
-                (filename, status, started_at, completed_at, error_message)
-                VALUES (?, ?, ?, NULL, NULL)
-            """, (filename, status, now))
-        elif status == 'completed':
-            cursor.execute("""
-                UPDATE processing_status 
-                SET status = ?, completed_at = ?
-                WHERE filename = ?
-            """, (status, now, filename))
-        elif status == 'failed':
-            cursor.execute("""
-                UPDATE processing_status 
-                SET status = ?, error_message = ?
-                WHERE filename = ?
-            """, (status, error_message, filename))
-        else:  # 'pending'
-            cursor.execute("""
-                INSERT OR REPLACE INTO processing_status 
-                (filename, status, started_at, completed_at, error_message)
-                VALUES (?, ?, NULL, NULL, NULL)
-            """, (filename, status))
-        
+        conn.execute(
+            "INSERT OR REPLACE INTO processing_status (filename, completed_at) "
+            "VALUES (?, ?)",
+            (filename, datetime.now().isoformat())
+        )
         conn.commit()
     except Exception as e:
         logger.error(f"Error setting status for {filename}: {e}")
@@ -347,130 +307,40 @@ def set_file_status(
     finally:
         conn.close()
 
-
-def cleanup_incomplete_files(db_path: str):
+        
+        
+def rebuild_detections(db_path: str) -> None:
     """
-    Cleanup incomplete file processing:
-    - Delete detections from files that were 'processing' but not completed
-    - Reset their status to 'pending'
-    
+    Prepare database for a full rescan (Rebuild job).
+
+    Keeps all metadata intact. Deletes all detections, resets all
+    processing_status entries to 'pending', and deletes the HDF5 file.
+
     Args:
         db_path: Path to SQLite database
     """
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
-    
     try:
-        # Find files that were being processed but not completed
-        # Note: 'pending' files were never started, so no cleanup needed
-        cursor.execute("""
-            SELECT filename FROM processing_status
-            WHERE status IN ('processing', 'failed')
-        """)
-        
-        incomplete_files = [row[0] for row in cursor.fetchall()]
-        
-        if incomplete_files:
-            logger.info(f"Found {len(incomplete_files)} incomplete files, cleaning up...")
-            
-            for filename in incomplete_files:
-                # Delete detections
-                cursor.execute("""
-                    DELETE FROM detections WHERE filename = ?
-                """, (filename,))
-                
-                # Reset status to pending
-                cursor.execute("""
-                    UPDATE processing_status 
-                    SET status = 'pending', started_at = NULL, 
-                        completed_at = NULL, error_message = NULL
-                    WHERE filename = ?
-                """, (filename,))
-                
-                logger.debug(f"Cleaned up incomplete file: {filename}")
-            
-            conn.commit()
-            logger.info(f"Cleanup complete: {len(incomplete_files)} files reset to pending")
-            
-            # Vacuum to reclaim space
-            vacuum_database(db_path)
-        else:
-            logger.info("No incomplete files found, no cleanup needed")
-            
+        cursor.execute("DELETE FROM detections")
+        cursor.execute("DELETE FROM processing_status")
+        conn.commit()
+        logger.info(f"Rebuild: detections cleared, all files reset to pending: {db_path}")
     except Exception as e:
-        logger.error(f"Error during cleanup: {e}")
+        logger.error(f"Error during rebuild_detections: {e}")
         conn.rollback()
     finally:
         conn.close()
 
+    # Delete HDF5 file if present
+    hdf5_path = Path(get_hdf5_path(db_path))
+    if hdf5_path.exists():
+        try:
+            hdf5_path.unlink()
+            logger.info(f"Rebuild: HDF5 deleted: {hdf5_path}")
+        except Exception as e:
+            logger.error(f"Rebuild: failed to delete HDF5: {e}")
 
-def repair_orphaned_metadata(db_path: str):
-    """
-    Find files in metadata that are missing from processing_status and add them.
-    
-    This can happen if the program was interrupted during insert_metadata().
-    
-    Args:
-        db_path: Path to SQLite database
-    """
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    
-    try:
-        # Find files in metadata but not in processing_status
-        cursor.execute("""
-            SELECT filename FROM metadata
-            WHERE filename NOT IN (SELECT filename FROM processing_status)
-        """)
-        
-        orphaned = [row[0] for row in cursor.fetchall()]
-        
-        if orphaned:
-            logger.warning(f"Found {len(orphaned)} files in metadata without processing status, repairing...")
-            
-            for filename in orphaned:
-                cursor.execute("""
-                    INSERT INTO processing_status (filename, status)
-                    VALUES (?, 'pending')
-                """, (filename,))
-            
-            conn.commit()
-            logger.info(f"Repaired {len(orphaned)} orphaned files")
-        
-    except Exception as e:
-        logger.error(f"Error repairing orphaned metadata: {e}")
-        conn.rollback()
-    finally:
-        conn.close()
-
-def get_completed_files(db_path: str) -> set[str]:
-    """
-    Get set of filenames that have been successfully processed.
-    
-    Args:
-        db_path: Path to SQLite database
-        
-    Returns:
-        Set of filenames with status 'completed'
-    """
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    
-    try:
-        cursor.execute("""
-            SELECT filename FROM processing_status
-            WHERE status = 'completed'
-        """)
-        
-        completed = {row[0] for row in cursor.fetchall()}
-        logger.info(f"Found {len(completed)} already completed files")
-        return completed
-        
-    except Exception as e:
-        logger.error(f"Error getting completed files: {e}")
-        return set()
-    finally:
-        conn.close()
 
 
 def check_indices_exist(db_path: str) -> bool:
