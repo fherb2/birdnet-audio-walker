@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from nicegui import ui
+from ..db_queries import get_db_completeness, get_db_min_confidence
 
 
 # ---------------------------------------------------------------------------
@@ -120,54 +121,43 @@ def _count_audio_files(folder: Path) -> int:
         return -1  # sentinel: no access
 
 
-def _check_db_status(folder: Path) -> str:
+def _get_folder_db_info(folder: Path) -> dict:
     """
-    Check database completeness for the folder.
+    Read completeness and min_confidence from folder's DB.
 
-    Returns:
-        'absent'     – no birdnet_analysis.db present
-        'incomplete' – db exists but not all audio files are registered
-        'complete'   – db exists and all audio files are registered
+    Returns dict with keys:
+        db_status:    'absent' | 'complete' | 'incomplete'
+        completed:    int
+        total:        int  (WAV files in metadata table)
+        min_conf:     float | None
     """
+    db_path = folder / DB_FILENAME
+    if not db_path.exists():
+        return {'db_status': 'absent', 'completed': 0, 'total': 0, 'min_conf': None}
+
     try:
-        db_path = folder / DB_FILENAME
-        if not db_path.exists():
-            return 'absent'
-
-        audio_files = {
-            f.name for f in folder.iterdir()
-            if f.is_file() and f.suffix.lower() in AUDIO_EXTENSIONS
+        completed, total = get_db_completeness(db_path)
+        min_conf = get_db_min_confidence(db_path)
+        if total == 0 or completed == total:
+            status = 'complete'
+        else:
+            status = 'incomplete'
+        return {
+            'db_status': status,
+            'completed': completed,
+            'total': total,
+            'min_conf': min_conf,
         }
-        if not audio_files:
-            # No audio files → db exists, nothing to index → treat as complete
-            return 'complete'
-
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.execute("SELECT filename FROM metadata")
-        db_files = {row['filename'] for row in cursor.fetchall()}
-        conn.close()
-
-        return 'complete' if audio_files <= db_files else 'incomplete'
-
-    except PermissionError:
-        return 'no_access'
-
     except Exception:
-        return 'incomplete'
+        return {'db_status': 'incomplete', 'completed': 0, 'total': 0, 'min_conf': None}
 
 
 async def _analyse_folder(folder: Path, loop: asyncio.AbstractEventLoop) -> dict:
-    """
-    Run folder analysis in a thread-pool executor.
-
-    Returns a dict with keys: path, audio_count, db_status.
-    """
-    audio_count, db_status = await asyncio.gather(
+    audio_count, db_info = await asyncio.gather(
         loop.run_in_executor(None, _count_audio_files, folder),
-        loop.run_in_executor(None, _check_db_status, folder),
+        loop.run_in_executor(None, _get_folder_db_info, folder),
     )
-    return {'path': folder, 'audio_count': audio_count, 'db_status': db_status}
+    return {'path': folder, 'audio_count': audio_count, **db_info}
 
 
 # ---------------------------------------------------------------------------
@@ -193,6 +183,7 @@ class FolderTree:
         show_extras: bool = True,
         min_root: Optional[Path] = None,
         on_add_job: Optional[Callable[[Path], None]] = None,
+        on_rebuild_job: Optional[Callable[[Path], None]] = None,
     ) -> None:
         self._root = root_path
         self._selected: Optional[Path] = None
@@ -201,6 +192,7 @@ class FolderTree:
         self._show_extras = show_extras
         self._min_root = min_root
         self._on_add_job = on_add_job
+        self._on_rebuild_job = on_rebuild_job
         self._rows: dict[Path, ui.row] = {}
         self._container: Optional[ui.element] = None
         self._render()
@@ -328,30 +320,59 @@ class FolderTree:
                     'Permission denied'
                 )
             elif self._show_extras:
-                audio_icon_html = SVG_AUDIO_SOME if audio_count > 0 else SVG_AUDIO_NONE
-                ui.html(audio_icon_html).classes('shrink-0').tooltip(
-                    f'{audio_count} audio file(s)'
+                # --- # audios ---
+                completed   = info['completed']
+                total_db    = info['total']
+                db_status   = info['db_status']
+                if db_status == 'absent':
+                    db_count_str = f'{audio_count}'
+                else:
+                    db_count_str = f'{completed}/{audio_count}'
+                ui.label(db_count_str).classes('text-caption w-16 text-right text-grey-9').tooltip(
+                    f'{completed}/{audio_count} audio file(s)'
                 )
-                ui.label(str(audio_count)).classes('text-caption w-6 text-right text-grey-9')
 
+                # --- min confidence from DB ---
+                db_status   = info['db_status']
+                completed   = info['completed']
+                total_db    = info['total']
+                min_conf    = info['min_conf']
+
+                conf_text = f'{min_conf:.2f}' if min_conf is not None else '–'
+                ui.label(conf_text).classes('text-caption w-10 text-right text-grey-7').tooltip(
+                    'Min. confidence used for this database'
+                )
+
+                # --- completeness DB icon ---
                 db_svg = {
                     'absent':     SVG_DB_ABSENT,
                     'incomplete': SVG_DB_INCOMPLETE,
                     'complete':   SVG_DB_COMPLETE,
                 }[db_status]
-                db_tooltip = {
+                db_tip = {
                     'absent':     'No database',
-                    'incomplete': 'Database incomplete',
-                    'complete':   'Database complete',
+                    'incomplete': f'{completed}/{total_db} files processed',
+                    'complete':   f'{completed}/{total_db} files processed',
                 }[db_status]
-                ui.html(db_svg).classes('shrink-0').tooltip(db_tooltip)
+                ui.html(db_svg).classes('shrink-0').tooltip(db_tip)
 
+            # --- ➕ Extend button ---
             if self._on_add_job is not None and not no_access:
                 ui.button(
-                    icon='add',
+                    '➕',
                     on_click=lambda f=folder: self._on_add_job(f),
-                ).props('flat dense round size=sm color=positive').tooltip(
-                    'Add folder to scout list'
+                ).props('flat dense size=sm color=positive').tooltip(
+                    'Add new audio files to existing database (Extend)'
+                )
+
+            # --- 🔄 Rebuild button (only if DB exists) ---
+            db_exists = (folder / DB_FILENAME).exists()
+            if self._on_rebuild_job is not None and not no_access and db_exists:
+                ui.button(
+                    icon='refresh',
+                    on_click=lambda f=folder: self._on_rebuild_job(f),
+                ).props('flat dense round size=sm color=warning').tooltip(
+                    'Clear detections and rescan all audio files (Rebuild)'
                 )
 
         # Click/dblclick only for accessible folders

@@ -38,9 +38,10 @@ class ScanJob:
     """
     A single folder scan job.
 
-    rescan_species=False (default): only WAV files not yet in the DB are analysed.
-    rescan_species=True:            all WAV files are re-analysed with BirdNET
-                                    using the given min_conf threshold.
+    rescan_species=False (default): only WAV files not yet in the DB are analysed
+                                    (Extend). min_conf is read from existing DB.
+    rescan_species=True:            DB detections are cleared, all WAV files are
+                                    re-analysed (Rebuild). min_conf from job settings.
 
     scan_embeddings=True:           embedding vectors are extracted / backfilled
                                     for every detection that has no embedding_idx yet.
@@ -50,9 +51,9 @@ class ScanJob:
     scan_embeddings: bool = True
     min_conf: float       = 0.4
 
-    # --- runtime fields (set by walker process) ---
+    # --- runtime fields (set by scout process) ---
     job_id:      str               = field(default_factory=lambda: str(uuid.uuid4()))
-    status:      str               = 'pending'   # 'pending'|'running'|'done'|'error'|'skipped'
+    status:      str               = 'pending'   # 'pending'|'flying'|'done'|'error'|'skipped'
     added_at:    datetime          = field(default_factory=datetime.now)
     started_at:  Optional[datetime] = None
     finished_at: Optional[datetime] = None
@@ -73,9 +74,9 @@ class QueueBundle:
     Holds all inter-process queues and the shared_state manager dict.
 
     Attributes:
-        job_queue:      Main → Walker   ScanJob objects (or SIGNAL_SHUTDOWN)
-        progress_queue: Walker → Main   progress dicts (see _progress_msg())
-        control_queue:  Main → Walker   SIGNAL_WAIT / SIGNAL_RESUME / SIGNAL_STOP
+        job_queue:      Main → Scout    ScanJob objects (or SIGNAL_SHUTDOWN)
+        progress_queue: Scout → Main    progress dicts (see _progress_msg())
+        control_queue:  Main → Scout    SIGNAL_WAIT / SIGNAL_RESUME / SIGNAL_STOP
         shared_state:   multiprocessing.Manager().dict()  readable by GUI
     """
     job_queue:      Queue
@@ -114,15 +115,17 @@ def create_queues(shared_state: dict) -> QueueBundle:
 def progress_msg(job: ScanJob) -> dict:
     """Build a serialisable progress snapshot from a ScanJob."""
     return {
-        'job_id':       job.job_id,
-        'status':       job.status,
-        'folder_path':  str(job.folder_path),
-        'files_total':  job.files_total,
-        'files_done':   job.files_done,
-        'current_file': job.current_file,
-        'error_msg':    job.error_msg,
-        'started_at':   job.started_at.isoformat() if job.started_at else None,
-        'finished_at':  job.finished_at.isoformat() if job.finished_at else None,
+        'job_id':         job.job_id,
+        'status':         job.status,
+        'folder_path':    str(job.folder_path),
+        'files_total':    job.files_total,
+        'files_done':     job.files_done,
+        'current_file':   job.current_file,
+        'error_msg':      job.error_msg,
+        'started_at':     job.started_at.isoformat() if job.started_at else None,
+        'finished_at':    job.finished_at.isoformat() if job.finished_at else None,
+        'rescan_species': job.rescan_species,
+        'min_conf':       job.min_conf,
     }
 
 
@@ -163,15 +166,15 @@ def send_control(bundle: QueueBundle, signal: str) -> None:
     logger.debug(f"Control signal sent: {signal}")
 
 
-def shutdown_walker(bundle: QueueBundle) -> None:
+def shutdown_scouting(bundle: QueueBundle) -> None:
     """
-    Send the poison pill to the walker process to request a graceful exit.
+    Send the poison pill to the scout process to request a graceful exit.
 
     Args:
         bundle: QueueBundle from create_queues()
     """
     bundle.job_queue.put(SIGNAL_SHUTDOWN)
-    logger.debug("Shutdown signal sent to walker")
+    logger.debug("Shutdown signal sent to scout process")
 
 
 # ---------------------------------------------------------------------------
@@ -186,7 +189,7 @@ def drain_progress_queue(bundle: QueueBundle) -> None:
     Non-blocking: returns immediately when the queue is empty.
 
     Progress messages update the matching entry in shared_state['jobs']
-    (matched by job_id). walker_status in shared_state is also updated.
+    (matched by job_id). scout_status in shared_state is also updated.
 
     Args:
         bundle: QueueBundle from create_queues()
@@ -212,15 +215,14 @@ def drain_progress_queue(bundle: QueueBundle) -> None:
         # Update top-level walker_status
         status = msg.get('status')
         if status:
-            if status == 'running':
-                bundle.shared_state['walker_status'] = 'running'
+            if status == 'flying':
+                bundle.shared_state['walker_status'] = 'flying'
             elif status in ('done', 'error', 'skipped'):
-                # Check if any job is still pending/running
                 any_active = any(
-                    j.get('status') in ('pending', 'running')
+                    j.get('status') in ('pending', 'flying')
                     for j in jobs
                 )
-                bundle.shared_state['walker_status'] = 'running' if any_active else 'idle'
+                bundle.shared_state['walker_status'] = 'flying' if any_active else 'idle'
 
         updated = True
 

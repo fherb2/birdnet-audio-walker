@@ -1,6 +1,6 @@
 <mxfile host="65bd71144e">
     <diagram name="Lokale DB-Erstellung" id="lokal">
-        <mxGraphModel dx="954" dy="673" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+        <mxGraphModel dx="832" dy="629" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
             <root>
                 <mxCell id="0"/>
                 <mxCell id="1" parent="0"/>
@@ -102,7 +102,7 @@
                 <mxCell id="arrow6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="diskann2" target="sqlemb2" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
-                <mxCell id="9" value="DiskANN-ID" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="arrow6">
+                <mxCell id="9" value="DiskANN-ID" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" parent="arrow6" vertex="1" connectable="0">
                     <mxGeometry x="0.1491" relative="1" as="geometry">
                         <mxPoint x="10" y="46" as="offset"/>
                     </mxGeometry>
@@ -118,49 +118,49 @@
                 <mxCell id="arrow8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;dashed=1;dashPattern=8 8;" parent="1" source="sqlemb2" target="sqldet3" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
-                <mxCell id="13" value="De-Referenzierung:&lt;br&gt;Welche Erkennungen&lt;br&gt;beruhen auf dem&lt;br&gt;Vektor?" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="arrow8">
+                <mxCell id="13" value="De-Referenzierung:&lt;br&gt;Welche Erkennungen&lt;br&gt;beruhen auf dem&lt;br&gt;Vektor?" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" parent="arrow8" vertex="1" connectable="0">
                     <mxGeometry x="0.0301" y="-1" relative="1" as="geometry">
                         <mxPoint y="116" as="offset"/>
                     </mxGeometry>
                 </mxCell>
-                <mxCell id="note1" value="⚠️ WICHTIG:&#xa;Mehrere Detections&#xa;können auf denselben&#xa;vector_id zeigen!" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;" parent="1" vertex="1">
-                    <mxGeometry x="40" y="360" width="200" height="80" as="geometry"/>
+                <mxCell id="note1" value="⚠️ WICHTIG:&lt;br&gt;&lt;br&gt;* Mehrere Detections&lt;br&gt;können auf denselben&lt;br&gt;vector_id zeigen!&lt;br&gt;&lt;br&gt;* Es gibt Vektoren, die keiner&lt;br&gt;Detection zugeordnet werden&lt;br&gt;können, weil im entsprechenden&lt;br&gt;Zeitsegment keine Erkennungen&lt;br&gt;über der vorgegebenen&lt;br&gt;Confidence-Schwelle vorhanden&lt;br&gt;sind. In diesem Fall wird der&lt;br&gt;Vektor sofort verworfen und nicht&lt;br&gt;weiter verarbeitet." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="30" y="300" width="220" height="330" as="geometry"/>
                 </mxCell>
-                <mxCell id="2" value="" style="endArrow=classic;html=1;" edge="1" parent="1">
+                <mxCell id="2" value="" style="endArrow=classic;html=1;" parent="1" edge="1">
                     <mxGeometry width="50" height="50" relative="1" as="geometry">
                         <mxPoint x="410" y="190" as="sourcePoint"/>
                         <mxPoint x="410" y="350" as="targetPoint"/>
                     </mxGeometry>
                 </mxCell>
-                <mxCell id="3" value="Erkennung (Kohlmeise)&lt;br&gt;Audiofile&lt;br&gt;Zeitausschnitt im File (Segment)&lt;br&gt;Confidence" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="2">
+                <mxCell id="3" value="Erkennung (Kohlmeise)&lt;br&gt;Audiofile&lt;br&gt;Zeitausschnitt im File (Segment)&lt;br&gt;Confidence" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" parent="2" vertex="1" connectable="0">
                     <mxGeometry x="-0.2057" y="-2" relative="1" as="geometry">
                         <mxPoint x="-88" y="6" as="offset"/>
                     </mxGeometry>
                 </mxCell>
-                <mxCell id="4" value="" style="endArrow=classic;html=1;dashed=1;dashPattern=1 4;" edge="1" parent="1" target="dedup1">
+                <mxCell id="4" value="" style="endArrow=classic;html=1;dashed=1;dashPattern=1 4;" parent="1" target="dedup1" edge="1">
                     <mxGeometry width="50" height="50" relative="1" as="geometry">
                         <mxPoint x="780" y="350" as="sourcePoint"/>
                         <mxPoint x="600" y="230" as="targetPoint"/>
                     </mxGeometry>
                 </mxCell>
-                <mxCell id="5" value="" style="endArrow=classic;html=1;entryX=0.409;entryY=0;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" target="sqlemb1">
+                <mxCell id="5" value="" style="endArrow=classic;html=1;entryX=0.409;entryY=0;entryDx=0;entryDy=0;entryPerimeter=0;" parent="1" target="sqlemb1" edge="1">
                     <mxGeometry width="50" height="50" relative="1" as="geometry">
                         <mxPoint x="670" y="180" as="sourcePoint"/>
                         <mxPoint x="600" y="230" as="targetPoint"/>
                     </mxGeometry>
                 </mxCell>
-                <mxCell id="6" value="Vektor" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="5">
+                <mxCell id="6" value="Vektor" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" parent="5" vertex="1" connectable="0">
                     <mxGeometry x="-0.0394" y="-1" relative="1" as="geometry">
                         <mxPoint x="-19" y="-6" as="offset"/>
                     </mxGeometry>
                 </mxCell>
-                <mxCell id="7" value="" style="endArrow=classic;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" target="sqlemb1">
+                <mxCell id="7" value="" style="endArrow=classic;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" target="sqlemb1" edge="1">
                     <mxGeometry width="50" height="50" relative="1" as="geometry">
                         <mxPoint x="870" y="160" as="sourcePoint"/>
                         <mxPoint x="700" y="350" as="targetPoint"/>
                     </mxGeometry>
                 </mxCell>
-                <mxCell id="8" value="Hash" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="7">
+                <mxCell id="8" value="Hash" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" parent="7" vertex="1" connectable="0">
                     <mxGeometry x="0.2182" relative="1" as="geometry">
                         <mxPoint x="39" y="-62" as="offset"/>
                     </mxGeometry>

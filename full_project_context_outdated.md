@@ -1,5 +1,10 @@
 # BirdNET Walker & Play - Vollständige Projekt-Dokumentation
 
+# OUTDATED
+
+Now all parts merged into a GUI suported birdnet-copter.
+
+
 Dieses Dokument dienst insbesondere als Kontext-Initialisierung mit Claude.ai .
 
 ## 1. Projekt-Übersicht

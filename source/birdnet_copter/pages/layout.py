@@ -59,6 +59,11 @@ def create_layout(app_state: AppState) -> ui.left_drawer:
         The ui.left_drawer instance (overlay nav menu).
         Pages normally don't need this reference.
     """
+    
+    # ------------------------------------------------------------------
+    # Page title (for Browser-Tabs)
+    # ------------------------------------------------------------------
+    ui.page_title('birdnet-copter')
 
     # ------------------------------------------------------------------
     # Navigation drawer (hamburger overlay)

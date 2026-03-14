@@ -1,12 +1,12 @@
 """
-Walker background process for birdnet-copter.
+Scout background process for birdnet-copter.
 
 Runs as a separate process (multiprocessing, spawn).
 Receives ScanJob objects via job_queue, processes them sequentially,
 and reports progress via progress_queue.
 Responds to WAIT / RESUME / STOP signals via control_queue.
 
-Entry point: run_walker_process()
+Entry point: run_scout_process()
 """
 
 import contextlib
@@ -40,13 +40,12 @@ from .database import (
     insert_metadata,
     batch_insert_detections,
     create_indices,
-    cleanup_incomplete_files,
-    get_completed_files,
     get_missing_files,
-    repair_orphaned_metadata,
     set_file_status,
     get_hdf5_path,
+    rebuild_detections,
 )
+from .db_queries import set_analysis_config
 from .birdnet_labels import load_birdnet_labels
 from .job_queue import (
     QueueBundle,
@@ -133,13 +132,13 @@ def _check_control(bundle: QueueBundle,
             break
         if signal == SIGNAL_STOP:
             stop_flag[0] = True
-            logger.info("Walker: STOP signal received")
+            logger.info("Scout: STOP signal received")
         elif signal == SIGNAL_WAIT:
             wait_flag[0] = True
-            logger.info("Walker: WAIT signal received")
+            logger.info("Scout: WAIT signal received")
         elif signal == SIGNAL_RESUME:
             wait_flag[0] = False
-            logger.info("Walker: RESUME signal received")
+            logger.info("Scout: RESUME signal received")
 
 
 def _block_until_resume(bundle: QueueBundle,
@@ -153,7 +152,7 @@ def _block_until_resume(bundle: QueueBundle,
     """
     job.status = 'waiting'
     _send_progress(bundle, job)
-    logger.info("Walker: entering WAIT state")
+    logger.info("Scout: entering WAIT state")
 
     while wait_flag[0]:
         time.sleep(0.2)
@@ -162,9 +161,9 @@ def _block_until_resume(bundle: QueueBundle,
             break
 
     if not stop_flag[0]:
-        job.status = 'running'
+        job.status = 'flying'
         _send_progress(bundle, job)
-        logger.info("Walker: resumed")
+        logger.info("Scout: resumed")
         
 # ---------------------------------------------------------------------------
 # Folder processing
@@ -178,6 +177,7 @@ def _process_folder(
     use_gpu: bool,
     stop_flag: list[bool],
     wait_flag: list[bool],
+    language_code: str,
 ) -> None:
     """
     Process all WAV files in job.folder_path.
@@ -189,19 +189,11 @@ def _process_folder(
     db_path     = folder_path / "birdnet_analysis.db"
     hdf5_path   = get_hdf5_path(str(db_path))
 
-    # --- DB init ---
+    # --- DB init / rebuild ---
     if not db_path.exists():
         init_database(str(db_path))
-
-    # Store language in DB config
-    lang_shortcut = next(
-        (v for k, v in birdnet_labels.items() if False), 'de'
-    )  # birdnet_labels has no lang code stored; language is set via config below
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    # language shortcut is passed implicitly: we write whatever was loaded
-    # The key is set in main.py when loading labels; we persist it here.
-    conn.close()
+    elif job.rescan_species:
+        rebuild_detections(str(db_path))
 
     # --- find WAV files ---
     wav_files: list[Path] = []
@@ -233,31 +225,30 @@ def _process_folder(
             except Exception as e:
                 logger.error(f"Walker: metadata extraction failed for {wav.name}: {e}")
 
-    repair_orphaned_metadata(str(db_path))
-    cleanup_incomplete_files(str(db_path))
-
-    # --- pending files ---
+    # --- files not yet completed ---
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
-    cursor.execute("SELECT filename FROM processing_status WHERE status = 'pending'")
-    pending = {row[0] for row in cursor.fetchall()}
+    cursor.execute("SELECT filename FROM processing_status WHERE status = 'completed'")
+    completed = {row[0] for row in cursor.fetchall()}
     conn.close()
 
-    # Load metadata for pending files not yet in metadata_map
+    not_completed = {f.name for f in wav_files} - completed
+
+    # Load metadata for not-completed files not yet in metadata_map
     for wav in wav_files:
-        if wav.name not in pending or wav.name in metadata_map:
+        if wav.name not in not_completed or wav.name in metadata_map:
             continue
         try:
             meta = extract_metadata(str(wav))
             meta['path'] = str(wav)
             metadata_map[wav.name] = meta
         except Exception as e:
-            logger.error(f"Walker: metadata load failed for {wav.name}: {e}")
+            logger.error(f"Scout: metadata load failed for {wav.name}: {e}")
 
-    files_to_process = [metadata_map[n] for n in pending if n in metadata_map]
+    files_to_process = [metadata_map[n] for n in not_completed if n in metadata_map]
 
     if not files_to_process:
-        logger.info(f"Walker: all files already processed in {folder_path}")
+        logger.info(f"Scout: all files already processed in {folder_path}")
         job.status = 'done'
         job.finished_at = datetime.now()
         _send_progress(bundle, job)
@@ -266,13 +257,20 @@ def _process_folder(
     job.files_total = len(files_to_process)
     _send_progress(bundle, job)
 
+    # Write analysis config before processing loop (only if not yet set)
+    from .db_queries import get_analysis_config
+    if get_analysis_config(db_path, 'min_confidence') is None:
+        set_analysis_config(db_path, 'min_confidence', str(job.min_conf))
+    if get_analysis_config(db_path, 'local_name_shortcut') is None:
+        set_analysis_config(db_path, 'local_name_shortcut', language_code)
+
     # --- GPU/CPU device string ---
     device = 'GPU' if use_gpu else 'CPU'
 
     # --- processing loop ---
     for meta in files_to_process:
         if stop_flag[0]:
-            logger.info("Walker: stop requested, aborting folder processing")
+            logger.info("Scout: stop requested, aborting folder processing")
             break
 
         filename  = meta['filename']
@@ -282,8 +280,6 @@ def _process_folder(
         _send_progress(bundle, job)
 
         try:
-            set_file_status(str(db_path), filename, 'processing')
-
             # --- BirdNET analysis ---
             with _capture_tf_output():
                 detections = analyze_file(
@@ -319,16 +315,11 @@ def _process_folder(
                     )
                 except Exception as e:
                     logger.error(f"Walker: embedding extraction failed for {filename}: {e}")
-                    set_file_status(str(db_path), filename, 'failed',
-                                    f'Embedding extraction failed: {e}')
                     job.files_done += 1
                     _send_progress(bundle, job)
                     continue
 
             # --- write to DB ---
-            # Build a minimal translation_table compatible list for batch_insert_detections.
-            # batch_insert_detections calls translate_species_name(scientific, df, labels).
-            # We pass translation_list as a pandas-compatible shim via a wrapper below.
             _batch_insert(
                 db_path=str(db_path),
                 filename=filename,
@@ -337,10 +328,11 @@ def _process_folder(
                 translation_list=translation_list,
                 birdnet_labels=birdnet_labels,
             )
+            # Mark file as completed (with or without detections)
+            set_file_status(str(db_path), filename, 'completed')
 
         except Exception as e:
-            logger.error(f"Walker: error processing {filename}: {e}")
-            set_file_status(str(db_path), filename, 'failed', str(e))
+            logger.error(f"Scout: error processing {filename}: {e}")
 
         job.files_done += 1
         _send_progress(bundle, job)
@@ -358,11 +350,11 @@ def _process_folder(
     if not stop_flag[0]:
         create_indices(str(db_path))
 
-    job.status     = 'done' if not stop_flag[0] else 'error'
-    job.error_msg  = 'stopped by user' if stop_flag[0] else ''
+    job.status     = 'done' if not stop_flag[0] else 'skipped'
+    job.error_msg  = 'terminated by user' if stop_flag[0] else ''
     job.finished_at = datetime.now()
     _send_progress(bundle, job)
-    logger.info(f"Walker: folder done – {job.files_done}/{job.files_total} files: {folder_path}")
+    logger.info(f"Scout: folder done – {job.files_done}/{job.files_total} files: {folder_path}")
 
 
 def _batch_insert(
@@ -414,17 +406,18 @@ def _batch_insert(
 
 
 # ---------------------------------------------------------------------------
-# Walker process entry point
+# Scout process entry point
 # ---------------------------------------------------------------------------
 
-def run_walker_process(
+def run_scout_process(
     bundle: QueueBundle,
     translation_list: list[dict],
     birdnet_labels: dict,
     use_gpu: bool,
+    language_code: str,
 ) -> None:
     """
-    Walker background process entry point.
+    Scout background process entry point.
 
     Runs an infinite loop waiting for ScanJob objects on bundle.job_queue.
     Exits cleanly when SIGNAL_SHUTDOWN (None) is received.
@@ -436,7 +429,7 @@ def run_walker_process(
         birdnet_labels:   Dict {scientific_name: local_name} for selected language
         use_gpu:          If True, BirdNET uses GPU; otherwise CPU
     """
-    logger.info("Walker process started")
+    logger.info("Scout process started")
 
     stop_flag = [False]   # [0] = stop after current file
     wait_flag = [False]   # [0] = pause after current batch
@@ -445,16 +438,16 @@ def run_walker_process(
         # Reset per-job stop flag; wait_flag persists across jobs until RESUME
         stop_flag[0] = False
 
-        logger.debug("Walker: waiting for next job...")
+        logger.debug("Scout: waiting for next job...")
         job: Optional[ScanJob] = bundle.job_queue.get(block=True)
 
         # Poison pill → graceful exit
         if job is SIGNAL_SHUTDOWN:
-            logger.info("Walker process: shutdown signal received, exiting")
+            logger.info("Scout process: shutdown signal received, exiting")
             break
 
         if not isinstance(job, ScanJob):
-            logger.warning(f"Walker: unexpected item in job_queue: {job!r}")
+            logger.warning(f"Scout: unexpected item in job_queue: {job!r}")
             continue
 
         # Check for pending wait from previous job
@@ -468,8 +461,8 @@ def run_walker_process(
                 _send_progress(bundle, job)
                 continue
 
-        logger.info(f"Walker: starting job {job.job_id[:8]} – {job.folder_path}")
-        job.status     = 'running'
+        logger.info(f"Scout: starting job {job.job_id[:8]} – {job.folder_path}")
+        job.status     = 'flying'
         job.started_at = datetime.now()
         _send_progress(bundle, job)
 
@@ -482,14 +475,15 @@ def run_walker_process(
                 use_gpu=use_gpu,
                 stop_flag=stop_flag,
                 wait_flag=wait_flag,
+                language_code=language_code,
             )
         except Exception as e:
-            logger.error(f"Walker: unhandled exception in job {job.job_id[:8]}: {e}")
+            logger.error(f"Scout: unhandled exception in job {job.job_id[:8]}: {e}")
             job.status      = 'error'
             job.error_msg   = str(e)
             job.finished_at = datetime.now()
             _send_progress(bundle, job)
 
-    logger.info("Walker process finished")
+    logger.info("Scout process finished")
     
     

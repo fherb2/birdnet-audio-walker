@@ -27,6 +27,8 @@ from nicegui import ui, app as nicegui_app, context as _ctx
 
 from ..app_state import AppState
 from ..pages.layout import create_layout
+from ..gui_elements.page_header import page_header
+from ..gui_elements.section_card import section_card
 from ..gui_elements.species_search import SpeciesSearch
 from ..db_queries import (
     get_analysis_config,
@@ -68,113 +70,112 @@ async def audio_player() -> None:
     # -----------------------------------------------------------------------
     # Section: Filters
     # -----------------------------------------------------------------------
-    ui.label('🔍 Search Filters').classes('text-h6 q-mt-md q-mb-xs')
+    with section_card('🔍', 'Filters', 'audio_player_filters'):
 
-    # Species + Xeno-Canto row
-    with ui.row().classes('w-full items-start gap-3'):
-        with ui.column().classes('flex-grow'):
-            species_search = SpeciesSearch(
-                db_path=state.active_db,
-                on_select=lambda s: setattr(state, 'ap_filter_species', s),
-                initial_value=state.ap_filter_species,
-            )
-
-        def _open_xc():
-            if state.ap_filter_species:
-                q = state.ap_filter_species.replace(' ', '+')
-                ui.navigate.to(
-                    f'https://xeno-canto.org/explore?query={q}&view=3',
-                    new_tab=True,
+        # Species + Xeno-Canto row
+        with ui.row().classes('w-full items-start gap-3'):
+            with ui.column().classes('flex-grow'):
+                species_search = SpeciesSearch(
+                    db_path=state.active_db,
+                    on_select=lambda s: setattr(state, 'ap_filter_species', s),
+                    initial_value=state.ap_filter_species,
                 )
 
-        xc_btn = ui.button('🔊 Xeno-Canto', on_click=_open_xc) \
-            .props('no-caps flat')
-        if not state.ap_filter_species:
-            xc_btn.disable()
+            def _open_xc():
+                if state.ap_filter_species:
+                    q = state.ap_filter_species.replace(' ', '+')
+                    ui.navigate.to(
+                        f'https://xeno-canto.org/explore?query={q}&view=3',
+                        new_tab=True,
+                    )
 
-        # Keep XC button in sync with species selection
-        def _on_species(sci: Optional[str]):
-            state.ap_filter_species = sci
-            xc_btn.enable() if sci else xc_btn.disable()
+            xc_btn = ui.button('🔊 Xeno-Canto', on_click=_open_xc) \
+                .props('no-caps flat')
+            if not state.ap_filter_species:
+                xc_btn.disable()
 
-        species_search._on_select = _on_species
+            # Keep XC button in sync with species selection
+            def _on_species(sci: Optional[str]):
+                state.ap_filter_species = sci
+                xc_btn.enable() if sci else xc_btn.disable()
 
-    # Date range
-    min_date, max_date = get_recording_date_range(state.active_db)
-    if state.ap_filter_date_from is None and min_date:
-        state.ap_filter_date_from = min_date.date()
-    if state.ap_filter_date_to is None and max_date:
-        state.ap_filter_date_to = max_date.date()
+            species_search._on_select = _on_species
 
-    with ui.row().classes('gap-4 items-end'):
-        date_from = ui.input(label='Date From',
-                             value=str(state.ap_filter_date_from) if state.ap_filter_date_from else '') \
-            .props('type=date outlined dense')
-        date_to = ui.input(label='Date To',
-                           value=str(state.ap_filter_date_to) if state.ap_filter_date_to else '') \
-            .props('type=date outlined dense')
+        # Date range
+        min_date, max_date = get_recording_date_range(state.active_db)
+        if state.ap_filter_date_from is None and min_date:
+            state.ap_filter_date_from = min_date.date()
+        if state.ap_filter_date_to is None and max_date:
+            state.ap_filter_date_to = max_date.date()
 
-    # Time filter (optional)
-    use_time = ui.checkbox(
-        'Enable Time Filter',
-        value=state.ap_filter_use_time,
-    )
-    with ui.row().classes('gap-4 items-end') as time_row:
-        time_start = ui.time(value=state.ap_filter_time_start.strftime('%H:%M')) \
-            .props('outlined dense label="Time Start"')
-        time_end = ui.time(value=state.ap_filter_time_end.strftime('%H:%M')) \
-            .props('outlined dense label="Time End"')
-    time_row.bind_visibility_from(use_time, 'value')
+        with ui.row().classes('gap-4 items-end'):
+            date_from = ui.input(label='Date From',
+                                value=str(state.ap_filter_date_from) if state.ap_filter_date_from else '') \
+                .props('type=date outlined dense')
+            date_to = ui.input(label='Date To',
+                            value=str(state.ap_filter_date_to) if state.ap_filter_date_to else '') \
+                .props('type=date outlined dense')
 
-    # Confidence / Limit / Offset / Sort
-    conf_options = ['All'] + [f'{i}%' for i in range(5, 100, 5)]
-    current_conf = (
-        f'{int(state.ap_filter_confidence * 100)}%'
-        if state.ap_filter_confidence is not None else 'All'
-    )
+        # Time filter (optional)
+        use_time = ui.checkbox(
+            'Enable Time Filter',
+            value=state.ap_filter_use_time,
+        )
+        with ui.row().classes('gap-4 items-end') as time_row:
+            time_start = ui.time(value=state.ap_filter_time_start.strftime('%H:%M')) \
+                .props('outlined dense label="Time Start"')
+            time_end = ui.time(value=state.ap_filter_time_end.strftime('%H:%M')) \
+                .props('outlined dense label="Time End"')
+        time_row.bind_visibility_from(use_time, 'value')
 
-    sort_labels = {
-        'time':       'Time (oldest→newest)',
-        'confidence': 'Confidence (high→low)',
-        'id':         'ID (upwards)',
-    }
+        # Confidence / Limit / Offset / Sort
+        conf_options = ['All'] + [f'{i}%' for i in range(5, 100, 5)]
+        current_conf = (
+            f'{int(state.ap_filter_confidence * 100)}%'
+            if state.ap_filter_confidence is not None else 'All'
+        )
 
-    with ui.row().classes('gap-4 items-end'):
-        conf_select = ui.select(
-            options=conf_options,
-            value=current_conf,
-            label='Min Confidence',
-        ).props('outlined dense').classes('w-32')
+        sort_labels = {
+            'time':       'Time (oldest→newest)',
+            'confidence': 'Confidence (high→low)',
+            'id':         'ID (upwards)',
+        }
 
-        limit_input = ui.number(
-            label='Limit', value=state.ap_filter_limit,
-            min=1, max=1000,
-        ).props('outlined dense').classes('w-24')
+        with ui.row().classes('gap-4 items-end'):
+            conf_select = ui.select(
+                options=conf_options,
+                value=current_conf,
+                label='Min Confidence',
+            ).props('outlined dense').classes('w-32')
 
-        offset_input = ui.number(
-            label='Offset', value=state.ap_filter_offset,
-            min=0, step=10,
-        ).props('outlined dense').classes('w-24')
+            limit_input = ui.number(
+                label='Limit', value=state.ap_filter_limit,
+                min=1, max=1000,
+            ).props('outlined dense').classes('w-24')
 
-        sort_select = ui.select(
-            options=list(sort_labels.values()),
-            value=sort_labels.get(state.ap_filter_sort, sort_labels['time']),
-            label='Sort By',
-        ).props('outlined dense').classes('w-56')
+            offset_input = ui.number(
+                label='Offset', value=state.ap_filter_offset,
+                min=0, step=10,
+            ).props('outlined dense').classes('w-24')
 
-    # Apply Filters button
-    apply_btn = ui.button(
-        '🔍 Apply Filters',
-        on_click=lambda: _apply_filters(),
-    ).props('no-caps color=primary').classes('w-full q-mt-sm')
+            sort_select = ui.select(
+                options=list(sort_labels.values()),
+                value=sort_labels.get(state.ap_filter_sort, sort_labels['time']),
+                label='Sort By',
+            ).props('outlined dense').classes('w-56')
 
-    ui.separator().classes('q-my-md')
+        # Apply Filters button
+        apply_btn = ui.button(
+            '🔍 Apply Filters',
+            on_click=lambda: _apply_filters(),
+        ).props('no-caps color=primary').classes('w-full q-mt-sm')
 
     # -----------------------------------------------------------------------
     # Section: Results area (hidden until filters applied)
     # -----------------------------------------------------------------------
-    with ui.column().classes('w-full gap-2') as results_col:
-        results_col.set_visibility(state.ap_filters_applied)
+    with section_card('🎵', 'Player', 'audio_player_player'):
+        with ui.column().classes('w-full gap-2') as results_col:
+            results_col.set_visibility(state.ap_filters_applied)
 
         # Statistics row
         with ui.row().classes('gap-6') as stats_row:
@@ -342,19 +343,18 @@ async def audio_player() -> None:
         # -----------------------------------------------------------------------
         # Section: Export buttons
         # -----------------------------------------------------------------------
-        with ui.row().classes('gap-3'):
+        with ui.row().classes('gap-3') as export_row:
             ui.button('💾 Export as WAV',
                     on_click=lambda: _export_wav()).props('no-caps flat')
             ui.button('💾 Export as MP3',
                     on_click=lambda: _export_mp3()).props('no-caps flat')
+        export_row.set_visibility(bool(state.detections))
 
         ui.separator().classes('q-my-sm')
 
         # -----------------------------------------------------------------------
         # Section: Audio player
         # -----------------------------------------------------------------------
-        ui.label('🎵 Audio Player').classes('text-h6')
-
         # Progress bar shown during generation
         with ui.row().classes('items-center gap-2 w-full') as gen_progress_row:
             gen_progress_bar = ui.linear_progress(value=0).classes('flex-grow')
@@ -641,6 +641,7 @@ async def audio_player() -> None:
         _refresh_detection_list()
         _update_stats()
         results_col.set_visibility(True)
+        export_row.set_visibility(True)
 
         # Start audio generation
         await _start_generation()

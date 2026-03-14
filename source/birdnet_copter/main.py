@@ -3,7 +3,7 @@ birdnet-copter – backend main.
 
 Starts three processes:
   1. This process (main): hardware detection, AppState init, queue management
-  2. Walker process:       sequential BirdNET analysis
+  2. Scouting Flight:      sequential BirdNET analysis
   3. GUI server:           NiceGUI / uvicorn (started last, blocks until shutdown)
 
 Usage:
@@ -23,8 +23,8 @@ from nicegui import app, ui
 
 from .app_state import AppState
 from .hardware import detect_hardware
-from .job_queue import create_queues, shutdown_walker, QueueBundle
-from .walker_process import run_walker_process
+from .job_queue import create_queues, shutdown_scouting, QueueBundle
+from .scout_process import run_scout_process
 from .birdnet_labels import get_available_languages, load_birdnet_labels
 from .species_translation import download_species_table
 from .config import DEFAULT_LANGUAGE
@@ -57,17 +57,18 @@ async def _startup_tasks(app_state: AppState) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Walker process management
+# Scout process management
 # ---------------------------------------------------------------------------
 
-def _start_walker(
+def _start_scouting(
     bundle: QueueBundle,
     translation_list: list[dict],
     birdnet_labels: dict,
     use_gpu: bool,
+    language_code: str,
 ) -> multiprocessing.Process:
     """
-    Spawn the walker background process.
+    Spawn the scout background process.
 
     Args:
         bundle:           QueueBundle from create_queues()
@@ -79,35 +80,36 @@ def _start_walker(
         Started Process object.
     """
     p = multiprocessing.Process(
-        target=run_walker_process,
-        args=(bundle, translation_list, birdnet_labels, use_gpu),
-        name="birdnet-walker",
-        daemon=True,
+        target=run_scout_process,
+        args=(bundle, translation_list, birdnet_labels, use_gpu, language_code),
+        name="scouting_flight",
+        daemon=False,
     )
     p.start()
-    logger.info(f"Walker process started (pid={p.pid})")
+    logger.info(f"Scout process started (pid={p.pid})")
     return p
 
 
-def start_walker_process(bundle: QueueBundle) -> None:
+def start_scout_process(bundle: QueueBundle) -> None:
     """
-    Start the walker background process on demand (called from Scouting Flight).
-    Does nothing if the walker is already running.
+    Start the scout background process on demand (called from Scouting Flight).
+    Does nothing if the scout is already flying.
     """
-    wp = getattr(app.state, 'walker_process', None)
+    wp = getattr(app.state, 'scout_process', None)
     if wp is not None and wp.is_alive():
-        logger.debug("Walker process already running, skipping start")
+        logger.debug("Scout process already flying, skipping start")
         return
 
     app_state: AppState = app.state.app_state
-    p = _start_walker(
+    p = _start_scouting(
         bundle=bundle,
         translation_list=app.state.translation_list,
         birdnet_labels=app.state.birdnet_labels,
         use_gpu=app_state.use_gpu,
+        language_code=app_state.language_code,
     )
-    app.state.walker_process = p
-    logger.info("Walker process started on demand")
+    app.state.scout_process = p
+    logger.info("Scout process started on demand")
 
 # ---------------------------------------------------------------------------
 # main()
@@ -187,19 +189,19 @@ def main() -> int:
         logger.error(f"Failed to load BirdNET labels for language '{DEFAULT_LANGUAGE}'")
         return 1
 
-    # Walker is started on demand from Scouting Flight (▶ Start button)
+    # Scout process is started on demand from Scouting Flight (▶ Take off button)
     app.state.translation_list = translation_list
     app.state.birdnet_labels   = birdnet_labels
 
     # --- Signal handlers ---
     def _signal_handler(signum, frame):
         logger.warning(f"Signal {signum} received – initiating shutdown")
-        shutdown_walker(bundle)
-        wp = getattr(app.state, 'walker_process', None)
+        shutdown_scouting(bundle)
+        wp = getattr(app.state, 'scout_process', None)
         if wp is not None:
             wp.join(timeout=5.0)
             if wp.is_alive():
-                logger.warning("Walker did not exit cleanly, terminating")
+                logger.warning("Scout process did not exit cleanly, terminating")
                 wp.terminate()
         sys.exit(0)
 
@@ -224,13 +226,13 @@ def main() -> int:
     ui.run(port=8090, reload=False, show=False)
 
     # --- Shutdown ---
-    logger.info("GUI server stopped – shutting down walker")
-    shutdown_walker(bundle)
-    wp = getattr(app.state, 'walker_process', None)
+    logger.info("GUI server stopped – shutting down scout process")
+    shutdown_scouting(bundle)
+    wp = getattr(app.state, 'scout_process', None)
     if wp is not None:
         wp.join(timeout=5.0)
         if wp.is_alive():
-            logger.warning("Walker did not exit cleanly, terminating")
+            logger.warning("Scout process did not exit cleanly, terminating")
             wp.terminate()
 
     manager.shutdown()

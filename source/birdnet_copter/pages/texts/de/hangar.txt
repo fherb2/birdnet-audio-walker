@@ -1,0 +1,5 @@
+Der Hangar ist die technische Basis-Konfiguration von birdnet-copter.
+
+Hier legst du den Root-Pfad fest, unter dem deine Aufnahme-Ordner liegen. Außerdem kannst du die Inferenz-Hardware (GPU/CPU) und den Embedding-Modus konfigurieren.
+
+Der globale Index ermöglicht eine datenbank-übergreifende Artenliste über alle Aufnahme-Ordner hinweg.

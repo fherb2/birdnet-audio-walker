@@ -25,6 +25,8 @@ from nicegui import ui, app as nicegui_app, context
 
 from ..app_state import AppState
 from ..pages.layout import create_layout
+from ..gui_elements.page_header import page_header
+from ..gui_elements.section_card import section_card
 from ..gui_elements.folder_tree import FolderTree
 from ..db_queries import (
     get_analysis_config,
@@ -51,7 +53,7 @@ async def exploration_area() -> None:
     state = _get_state()
     create_layout(state)
 
-    ui.label('🗺 Exploration Area').classes('text-h5 q-mt-md q-mb-sm')
+    page_header('🗺', 'Exploration Area', 'exploration_area')
 
     # Page-local state
     page: dict = {
@@ -90,64 +92,75 @@ async def exploration_area() -> None:
             sidebar.hide()
 
     # -----------------------------------------------------------------------
-    # Section 1: DB type selector
+    # Section 1+2+3: Database (type selector, folder view, DB info)
     # -----------------------------------------------------------------------
-    ui.label('🗂 Database Type').classes('text-h6 q-mb-xs')
+    with section_card('🗄', 'Database', 'exploration_database'):
 
-    db_type = ui.radio(
-        options={'local': '🗂 Local Database', 'global': '🌐 Global Database'},
-        value='global' if state.active_db_is_global else 'local',
-        on_change=lambda e: _on_db_type_change(e.value),
-    ).props('inline')
+        db_type = ui.radio(
+            options={'local': '🗂 Local Database', 'global': '🌐 Global Database'},
+            value='global' if state.active_db_is_global else 'local',
+            on_change=lambda e: _on_db_type_change(e.value),
+        ).props('inline')
+
+        # Folder View (local DB selection)
+        with ui.column().classes('w-full') as folder_section:
+            ui.label('📂 Select Database Folder').classes('text-subtitle1 q-mt-sm q-mb-xs')
+
+            def _on_folder_selected(folder: Path) -> None:
+                db_path = folder / 'birdnet_analysis.db'
+                if db_path.exists():
+                    if db_path != state.active_db:
+                        state.reset_filter_state()
+                        state.active_db = db_path
+                        lang = get_analysis_config(db_path, 'local_name_shortcut')
+                        state.language_code = lang if lang else 'de'
+                        logger.info(f'Switched to database: {db_path}')
+                    _refresh_db_info()
+                    _render_recording_files.refresh()
+                    _render_species_list.refresh()
+                    _update_sidebar(None)
+                    asyncio.create_task(_run_actualize())
+                else:
+                    state.active_db = None
+                    state.language_code = 'de'
+                    _refresh_db_info()
+                    _render_recording_files.refresh()
+                    _render_species_list.refresh()
+                    _update_sidebar(None)
+
+            FolderTree(
+                root_path=state.root_path,
+                on_select=_on_folder_selected,
+                show_extras=True,
+                min_root=None,
+            )
+
+        # Global DB info row (shown when global DB selected)
+        with ui.row().classes('items-center gap-2 q-mt-sm') as global_info_row:
+            ui.icon('public').classes('text-blue-6')
+            global_path_label = ui.label(
+                str(state.global_index_path) if state.global_index_path else '(not configured)'
+            ).classes('text-body2 text-grey-10')
+
+        # Initial visibility
+        _is_global = state.active_db_is_global
+        folder_section.set_visibility(not _is_global)
+        global_info_row.set_visibility(_is_global)
+
+        # Database Information
+        ui.separator().classes('q-my-sm')
+
+        with ui.row().classes('gap-4 items-start') as db_info_row:
+            metric_lang    = ui.column()
+            metric_conf    = ui.column()
+            metric_created = ui.column()
+            metric_species = ui.column()
+
+        no_db_hint = ui.label('No database selected.').classes('text-caption text-grey-6')
 
     # -----------------------------------------------------------------------
-    # Section 2: Folder View (local DB selection)
+    # Helpers (defined after card so they can reference card-internal widgets)
     # -----------------------------------------------------------------------
-    with ui.column().classes('w-full') as folder_section:
-        ui.label('📂 Select Database Folder').classes('text-h6 q-mt-sm q-mb-xs')
-
-        def _on_folder_selected(folder: Path) -> None:
-            db_path = folder / 'birdnet_analysis.db'
-            if db_path.exists():
-                if db_path != state.active_db:
-                    state.reset_filter_state()
-                    state.active_db = db_path
-                    lang = get_analysis_config(db_path, 'local_name_shortcut')
-                    state.language_code = lang if lang else 'de'
-                    logger.info(f'Switched to database: {db_path}')
-                _refresh_db_info()
-                _render_recording_files.refresh()
-                _render_species_list.refresh()
-                _update_sidebar(None)
-            else:
-                state.active_db = None
-                state.language_code = 'de'
-                _refresh_db_info()
-                _render_recording_files.refresh()
-                _render_species_list.refresh()
-                _update_sidebar(None)
-
-        FolderTree(
-            root_path=state.root_path,
-            on_select=_on_folder_selected,
-            show_extras=True,
-            min_root=None,   # exploration allows free navigation
-        )
-
-    # -----------------------------------------------------------------------
-    # Global DB info row (shown when global DB selected)
-    # -----------------------------------------------------------------------
-    with ui.row().classes('items-center gap-2 q-mt-sm') as global_info_row:
-        ui.icon('public').classes('text-blue-6')
-        global_path_label = ui.label(
-            str(state.global_index_path) if state.global_index_path else '(not configured)'
-        ).classes('text-body2 text-grey-10')
-
-    # Initial visibility
-    _is_global = state.active_db_is_global
-    folder_section.set_visibility(not _is_global)
-    global_info_row.set_visibility(_is_global)
-
     def _on_db_type_change(val: str) -> None:
         if val == 'global':
             state.active_db_is_global = True
@@ -166,21 +179,7 @@ async def exploration_area() -> None:
         _render_recording_files.refresh()
         _render_species_list.refresh()
         _update_sidebar(None)
-
-    ui.separator().classes('q-my-md')
-
-    # -----------------------------------------------------------------------
-    # Section 3: Database Information
-    # -----------------------------------------------------------------------
-    ui.label('📊 Database Information').classes('text-h6 q-mb-xs')
-
-    with ui.row().classes('gap-4 items-start') as db_info_row:
-        metric_lang    = ui.column()
-        metric_conf    = ui.column()
-        metric_created = ui.column()
-        metric_species = ui.column()
-
-    no_db_hint = ui.label('No database selected.').classes('text-caption text-grey-6')
+        asyncio.create_task(_run_actualize())
 
     def _render_metric(container: ui.column, label: str, value: str) -> None:
         container.clear()
@@ -199,13 +198,11 @@ async def exploration_area() -> None:
         if db is None or not db.exists():
             db_info_row.set_visibility(False)
             no_db_hint.set_visibility(True)
-            actualize_row.set_visibility(False)
             notes_section.set_visibility(False)
             return
 
         db_info_row.set_visibility(True)
         no_db_hint.set_visibility(False)
-        actualize_row.set_visibility(True)
         notes_section.set_visibility(True)
 
         lang      = get_analysis_config(db, 'local_name_shortcut') or '–'
@@ -223,56 +220,30 @@ async def exploration_area() -> None:
         comment = get_analysis_config(db, 'user_comment') or ''
         notes_area.set_value(comment)
 
-    ui.separator().classes('q-my-md')
-
-    # -----------------------------------------------------------------------
-    # Section 4: Actualize Species List
-    # -----------------------------------------------------------------------
-    with ui.row().classes('items-center gap-3') as actualize_row:
-        act_btn = ui.button(
-            '🔄 Actualize Species List',
-            on_click=lambda: asyncio.create_task(_run_actualize()),
-        ).props('no-caps')
-        if state.read_only:
-            act_btn.disable()
-        act_spinner = ui.spinner(size='sm')
-        act_spinner.set_visibility(False)
-        act_status = ui.label('').classes('text-caption')
-
     async def _run_actualize() -> None:
         db = _active_db()
         if page['actualize_running'] or db is None:
             return
         page['actualize_running'] = True
-        act_btn.disable()
-        act_spinner.set_visibility(True)
-        act_status.set_text('Updating…')
         try:
             loop = asyncio.get_event_loop()
             success = await loop.run_in_executor(
                 None, create_species_list_table, db
             )
             if success:
-                count = get_species_count(db)
-                act_status.set_text(f'✅ Done – {count} species')
                 _refresh_db_info()
+                _render_species_list.refresh()
             else:
-                act_status.set_text('❌ Failed')
+                logger.warning('Actualize species list failed silently')
         except Exception as e:
             logger.error(f'Actualize failed: {e}')
-            act_status.set_text(f'❌ Error: {e}')
         finally:
             page['actualize_running'] = False
-            act_btn.enable()
-            act_spinner.set_visibility(False)
-
-    ui.separator().classes('q-my-md')
 
     # -----------------------------------------------------------------------
     # Section 5: Notes
     # -----------------------------------------------------------------------
-    with ui.column().classes('w-full gap-2') as notes_section:
-        ui.label('📝 Notes').classes('text-h6')
+    with section_card('📝', 'Notes', 'exploration_notes') as notes_section:
         notes_area = ui.textarea(
             label='Database notes / comments',
             placeholder='Add notes about this recording session…',
@@ -299,20 +270,16 @@ async def exploration_area() -> None:
     _refresh_db_info()
     db_init = _active_db()
     if db_init is None or not db_init.exists():
-        actualize_row.set_visibility(False)
         notes_section.set_visibility(False)
     else:
         comment = get_analysis_config(db_init, 'user_comment') or ''
         notes_area.set_value(comment)
-
-    ui.separator().classes('q-my-md')
 
     # -----------------------------------------------------------------------
     # Section 6: Recording Files
     # -----------------------------------------------------------------------
     @ui.refreshable
     def _render_recording_files() -> None:
-        ui.label('📁 Recording Files').classes('text-h6 q-mb-xs')
         db = _active_db()
 
         if db is None or not db.exists():
@@ -362,7 +329,6 @@ async def exploration_area() -> None:
     # -----------------------------------------------------------------------
     @ui.refreshable
     def _render_species_list() -> None:
-        ui.label('🦜 Species List').classes('text-h6 q-mb-xs')
         db = _active_db()
 
         if db is None or not db.exists():
@@ -432,8 +398,7 @@ async def exploration_area() -> None:
 
         grid.on('rowSelected', on_row_selected)
 
-        ui.separator().classes('q-my-md')
-        ui.label('📥 Download Species List').classes('text-h6 q-mb-xs')
+        ui.label('📥 Download Species List').classes('text-subtitle1 q-mb-xs')
 
         download_scope = ui.radio(
             options={'all': 'All species', 'filtered': 'Only filtered species'},
@@ -454,10 +419,10 @@ async def exploration_area() -> None:
                 ),
             ).props('no-caps')
 
-    ui.separator().classes('q-my-md')
-    _render_recording_files()
-    ui.separator().classes('q-my-md')
-    _render_species_list()
+    with section_card('📁', 'Recording Files', 'exploration_recording_files'):
+        _render_recording_files()
+    with section_card('🦜', 'Species List', 'exploration_species_list'):
+        _render_species_list()
     
 # ===========================================================================
 # Module-level helpers  (append after the @ui.page handler)

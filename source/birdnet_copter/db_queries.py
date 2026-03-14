@@ -672,4 +672,46 @@ def search_species_in_list(db_path: Path, search_term: str, limit: int = 10) -> 
         return []
     
     
-    
+def get_db_completeness(db_path: Path) -> tuple[int, int]:
+    """
+    Return (completed_count, total_wav_count) for a folder's database.
+
+    completed_count: files with status 'completed' in processing_status
+    total_wav_count: files in metadata table (= all WAVs ever seen by scout)
+
+    Args:
+        db_path: Path to birdnet_analysis.db
+
+    Returns:
+        Tuple (completed, total). Returns (0, 0) if DB not readable.
+    """
+    try:
+        conn = get_db_connection(db_path)
+        cursor = conn.execute(
+            "SELECT COUNT(*) FROM processing_status"
+        )
+        completed = cursor.fetchone()[0]
+        cursor = conn.execute("SELECT COUNT(*) FROM metadata")
+        total = cursor.fetchone()[0]
+        conn.close()
+        return (completed, total)
+    except Exception as e:
+        logger.error(f"get_db_completeness failed for {db_path}: {e}")
+        return (0, 0)
+
+
+def get_db_min_confidence(db_path: Path) -> Optional[float]:
+    """
+    Read min_confidence from analysis_config table.
+
+    Returns:
+        Float value or None if not set yet.
+    """
+    val = get_analysis_config(db_path, 'min_confidence')
+    try:
+        return float(val) if val is not None else None
+    except ValueError:
+        return None
+
+
+   
