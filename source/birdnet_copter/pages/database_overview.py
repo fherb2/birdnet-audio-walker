@@ -27,6 +27,7 @@ from shared.db_queries import (
     get_all_metadata,
     get_recording_date_range,
 )
+from ..bird_language import load_labels
 
 
 # ---------------------------------------------------------------------------
@@ -93,8 +94,6 @@ async def database_overview() -> None:
             if db_path != state.active_db:
                 state.reset_filter_state()
                 state.active_db = db_path
-                lang = get_analysis_config(db_path, 'local_name_shortcut')
-                state.language_code = lang if lang else 'de'
                 logger.info(f"Switched to database: {db_path}")
             _refresh_db_info()
             _render_recording_files.refresh()
@@ -102,7 +101,6 @@ async def database_overview() -> None:
             _update_sidebar(None)
         else:
             state.active_db = None
-            state.language_code = 'de'
             _refresh_db_info()
             _render_recording_files.refresh()
             _render_species_list.refresh()
@@ -126,7 +124,6 @@ async def database_overview() -> None:
     ui.label('📊 Database Information').classes('text-h6 q-mb-xs')
 
     with ui.row().classes('gap-4 items-start') as db_info_row:
-        metric_lang    = ui.column()
         metric_conf    = ui.column()
         metric_created = ui.column()
         metric_species = ui.column()
@@ -153,14 +150,12 @@ async def database_overview() -> None:
         actualize_row.set_visibility(True)
         notes_section.set_visibility(True)
 
-        lang     = get_analysis_config(db, 'local_name_shortcut') or '–'
         conf     = get_analysis_config(db, 'confidence_threshold')
         conf_str = f"{float(conf)*100:.0f}%" if conf else '–'
         created  = get_analysis_config(db, 'created_at') or '–'
         count    = get_species_count(db)
         count_str = str(count) if count > 0 else 'not available'
 
-        _render_metric(metric_lang,    'Language',             lang)
         _render_metric(metric_conf,    'Confidence Threshold', conf_str)
         _render_metric(metric_created, 'Created',              created)
         _render_metric(metric_species, 'Species',              count_str)
@@ -309,7 +304,8 @@ async def database_overview() -> None:
             ui.label('No database selected.').classes('text-caption text-grey-6')
             return
 
-        species_list = get_species_list_with_counts(state.active_db)
+        labels = load_labels(state.bird_language_code)
+        species_list = get_species_list_with_counts(state.active_db, labels=labels)
         if not species_list:
             ui.label(
                 '⚠️ Species list not available. '
@@ -324,8 +320,7 @@ async def database_overview() -> None:
         for s in species_list:
             grid_rows.append({
                 'scientific_name': s['scientific_name'],
-                'local_name':      s['local_name'] or '',
-                'name_cs':         s['name_cs'] or '',
+                'local_name':      s.get('local_name') or '',
                 'detections':      format_detections_column(
                                        s['count_high'], s['count_low'],
                                        s['score'], min_score,
@@ -343,10 +338,6 @@ async def database_overview() -> None:
                 'width': 250, 'sortable': True, 'filter': True, 'resizable': True,
             },
             {
-                'headerName': 'Czech Name', 'field': 'name_cs',
-                'width': 200, 'sortable': True, 'filter': True, 'resizable': True,
-            },
-            {
                 'headerName': 'Detections (≥70% / all) {score}', 'field': 'detections',
                 'width': 260, 'sortable': False, 'filter': False, 'resizable': True,
             },
@@ -355,7 +346,7 @@ async def database_overview() -> None:
                 'hide': True, 'sort': 'desc',
             },
         ]
-
+        
         grid = ui.aggrid({
             'columnDefs': grid_cols,
             'rowData': grid_rows,
@@ -431,15 +422,15 @@ def _build_meta_header(state: AppState) -> dict:
 
 
 async def _get_all_rows(state: AppState) -> List[Dict]:
-    species_list = get_species_list_with_counts(state.active_db)
+    labels = load_labels(state.bird_language_code)
+    species_list = get_species_list_with_counts(state.active_db, labels=labels)
     if not species_list:
         return []
     min_score = min(s['score'] for s in species_list)
     return [
         {
             'Scientific Name': s['scientific_name'],
-            'Local Name':      s['local_name'] or '',
-            'Czech Name':      s['name_cs'] or '',
+            'Local Name':      s.get('local_name') or '',
             'Detections':      format_detections_column(
                                    s['count_high'], s['count_low'],
                                    s['score'], min_score,
@@ -462,7 +453,6 @@ async def _download_csv(state: AppState, grid: ui.aggrid, scope: str, client) ->
                     {
                         'Scientific Name': r.get('scientific_name', ''),
                         'Local Name':      r.get('local_name', ''),
-                        'Czech Name':      r.get('name_cs', ''),
                         'Detections':      r.get('detections', ''),
                     }
                     for r in (raw or [])
@@ -504,7 +494,6 @@ async def _download_excel(state: AppState, grid: ui.aggrid, scope: str, client) 
                     {
                         'Scientific Name': r.get('scientific_name', ''),
                         'Local Name':      r.get('local_name', ''),
-                        'Czech Name':      r.get('name_cs', ''),
                         'Detections':      r.get('detections', ''),
                     }
                     for r in (raw or [])

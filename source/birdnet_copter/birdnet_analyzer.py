@@ -232,41 +232,59 @@ def create_or_open_hdf5(hdf5_path: str, mode: str = 'a') -> h5py.File:
 
 def write_embeddings_to_hdf5(
     hdf5_path: str,
-    embeddings: np.ndarray
-) -> int:
+    filename: str,
+    file_start_utc: datetime,
+    embeddings_array: np.ndarray,
+    segment_times: list[tuple[float, float]],
+    delta_t: float,
+    step_width: float,
+) -> None:
     """
-    Write embeddings to HDF5 file and return start index.
-    
-    Args:
-        hdf5_path: Path to HDF5 file
-        embeddings: Array of shape (n_segments, 1024)
-        
-    Returns:
-        Start index of written embeddings (for referencing from SQLite)
-        
-    Raises:
-        Exception: If write fails
-    """
-    from .config import HDF5_DATASET_NAME
-    
-    # Open file in append mode
-    with create_or_open_hdf5(hdf5_path, mode='a') as f:
-        dataset = f[HDF5_DATASET_NAME]
-        
-        # Get current size (this will be the start index)
-        start_idx = dataset.shape[0]
-        
-        # Resize dataset to fit new embeddings
-        new_size = start_idx + len(embeddings)
-        dataset.resize((new_size, dataset.shape[1]))
-        
-        # Write embeddings
-        dataset[start_idx:new_size] = embeddings
-        
-        logger.debug(f"Wrote {len(embeddings)} embeddings to HDF5 at index {start_idx}-{new_size-1}")
-        
-        return start_idx
+    Write embeddings for one audio file into HDF5, one group per file.
 
+    Segments without detections are written as zero vectors.
+    The group is deleted and rewritten if it already exists (Rebuild case).
+
+    Args:
+        hdf5_path:       Path to HDF5 file
+        filename:        Audio filename (used as group name)
+        file_start_utc:  UTC start time of the audio file
+        embeddings_array: Full embeddings array shape (n_segments, 1024)
+        segment_times:   List of (start_time, end_time) tuples (seconds from file start)
+        delta_t:         Segment duration in seconds (e.g. 3.0)
+        step_width:      Hop size in seconds (segment_duration_s - overlap_duration_s)
+    """
+    from .config import HDF5_DATASET_NAME, HDF5_COMPRESSION, HDF5_COMPRESSION_LEVEL
+
+    n_segments = len(segment_times)
+
+    with create_or_open_hdf5(hdf5_path, mode='a') as f:
+        # Delete existing group for this file (Rebuild case)
+        if filename in f:
+            del f[filename]
+            logger.debug(f"HDF5: deleted existing group '{filename}'")
+
+        grp = f.create_group(filename)
+
+        # Attributes
+        grp.attrs['filename']   = filename
+        grp.attrs['file_start'] = file_start_utc.strftime('%Y-%m-%dT%H:%M:%S+00:00')
+        grp.attrs['delta_t']    = delta_t
+        grp.attrs['step_width'] = step_width
+
+        # Write full embeddings array (zero vectors for empty segments)
+        grp.create_dataset(
+            HDF5_DATASET_NAME,
+            data=embeddings_array,
+            dtype='float32',
+            compression=HDF5_COMPRESSION,
+            compression_opts=HDF5_COMPRESSION_LEVEL,
+        )
+
+    logger.debug(
+        f"HDF5: wrote {n_segments} segments for '{filename}' "
+        f"(delta_t={delta_t}s, step_width={step_width}s)"
+    )
 
 
 def calculate_segment_times(
@@ -303,152 +321,6 @@ def calculate_segment_times(
     return times
 
 
-def find_needed_segments(
-    detections: list[dict],
-    segment_times: list[tuple[float, float]]
-) -> dict[int, int]:
-    """
-    Find which segments are needed (have detections).
-    
-    Uses EXACT time matching - detection time must EXACTLY match segment time!
-    This is critical because BirdNET uses the same segmentation for both
-    analyze_file() and extract_embeddings(), so times will be identical.
-    
-    Creates a compact index mapping: old_segment_idx -> new_compact_idx
-    
-    Args:
-        detections: List of detection dicts with 'start_time' and 'end_time'
-        segment_times: List of (start, end) tuples for each segment
-        
-    Returns:
-        Dict mapping old_segment_idx (in full array) to new_compact_idx (in filtered array)
-        
-    Example:
-        If segments 5, 12, 13, 20 have detections:
-        {5: 0, 12: 1, 13: 2, 20: 3}
-    """
-    needed_segments = set()
-    
-    for detection in detections:
-        det_start = detection['start_time']
-        det_end = detection['end_time']
-        
-        # Find segment with EXACT time match
-        for seg_idx, (seg_start, seg_end) in enumerate(segment_times):
-            # EXACT match - same start AND end time
-            # BirdNET uses identical segmentation for analyze + encode
-            if det_start == seg_start and det_end == seg_end:
-                needed_segments.add(seg_idx)
-                break  # Found exact match, no need to continue
-    
-    # Create compact mapping: old_idx -> new_compact_idx
-    sorted_needed = sorted(needed_segments)
-    index_mapping = {old_idx: new_idx for new_idx, old_idx in enumerate(sorted_needed)}
-    
-    logger.debug(f"Need {len(index_mapping)} of {len(segment_times)} segments "
-                f"(ratio: {len(index_mapping)/len(segment_times)*100:.1f}%)")
-    
-    return index_mapping
-
-def filter_and_write_embeddings(
-    embeddings_array: np.ndarray,
-    index_mapping: dict[int, int],
-    hdf5_path: str
-) -> int:
-    """
-    Filter embeddings to only needed ones and write to HDF5.
-    
-    Args:
-        embeddings_array: Full embeddings array (n_segments, 1024)
-        index_mapping: Dict {old_segment_idx -> new_compact_idx}
-        hdf5_path: Path to HDF5 file
-        
-    Returns:
-        Start index in HDF5 where these embeddings begin
-    """
-    # Get only needed embeddings in compact order
-    sorted_indices = sorted(index_mapping.keys())
-    filtered_embeddings = embeddings_array[sorted_indices]
-    
-    logger.debug(f"Filtered embeddings from {len(embeddings_array)} to {len(filtered_embeddings)}")
-    
-    # Write to HDF5
-    start_idx = write_embeddings_to_hdf5(hdf5_path, filtered_embeddings)
-    
-    return start_idx
 
 
-
-def match_embeddings_to_detections(
-    detections: list[dict],
-    segment_times: list[tuple[float, float]],
-    index_mapping: dict[int, int],
-    start_idx: int
-) -> list[dict]:
-    """
-    Match detections to HDF5 embedding indices using EXACT time matching.
-    
-    CRITICAL: Detection time must EXACTLY match segment time!
-    BirdNET uses identical segmentation for analyze_file() and extract_embeddings(),
-    so a detection at time X will have an embedding at exactly the same time X.
-    
-    Args:
-        detections: List of detection dicts from analyze_file()
-        segment_times: List of (start, end) tuples for each segment
-        index_mapping: Dict {old_segment_idx -> new_compact_idx}
-        start_idx: Start index in HDF5 where this file's embeddings begin
-        
-    Returns:
-        List of detections with 'embedding_idx' key added (integer or None)
-        
-    Example:
-        Detection: 2:03:22.721 - 2:03:25.721
-        Segment:   2:03:22.721 - 2:03:25.721  ← EXACT MATCH!
-        → Use this segment's embedding
-    """
-    detections_with_indices = []
-    
-    logger.debug(f"Matching {len(detections)} detections to embeddings "
-                f"(start_idx={start_idx}, n_filtered={len(index_mapping)})")
-    
-    matched_count = 0
-    
-    for detection in detections:
-        det_start = detection['start_time']
-        det_end = detection['end_time']
-        
-        # Find segment with EXACT time match
-        matching_segment_idx = None
-        
-        for seg_idx, (seg_start, seg_end) in enumerate(segment_times):
-            # EXACT match - same start AND end time
-            if det_start == seg_start and det_end == seg_end:
-                matching_segment_idx = seg_idx
-                break  # Found exact match!
-        
-        detection_copy = detection.copy()
-        
-        # Check if matching segment is in our filtered set
-        if matching_segment_idx is not None and matching_segment_idx in index_mapping:
-            # Map to compact index and add HDF5 offset
-            compact_idx = index_mapping[matching_segment_idx]
-            hdf5_idx = start_idx + compact_idx
-            detection_copy['embedding_idx'] = hdf5_idx
-            matched_count += 1
-        else:
-            # This should NOT happen if BirdNET uses identical segmentation!
-            logger.warning(
-                f"Detection at {det_start:.3f}-{det_end:.3f}s has no exact time match! "
-                f"Setting embedding_idx to None."
-            )
-            detection_copy['embedding_idx'] = None
-        
-        detections_with_indices.append(detection_copy)
-    
-    logger.debug(f"Successfully matched {matched_count}/{len(detections)} detections to embeddings")
-    
-    if matched_count < len(detections):
-        logger.warning(f"{len(detections) - matched_count} detections could not be matched!")
-    
-    return detections_with_indices
 

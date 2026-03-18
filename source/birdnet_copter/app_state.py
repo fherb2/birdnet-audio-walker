@@ -29,7 +29,10 @@ class AppState:
     read_only: bool = False
     available_dbs: List[Path] = field(default_factory=list)
     active_db: Optional[Path] = None
-    language_code: str = 'de'
+    # Bird name language (fully implemented)
+    bird_language_code: str = 'de'
+    # GUI language (prepared, not yet active)
+    gui_language_code: str = 'de'
     
     # ------------------------------------------------------------------
     # Hardware & inference configuration  (filled by hardware.py / Hangar)
@@ -39,6 +42,12 @@ class AppState:
     use_gpu: bool = True
     use_embeddings: bool = False
     global_index_path: Optional[Path] = None
+    
+    # ------------------------------------------------------------------
+    # GPU Watchdog
+    # ------------------------------------------------------------------
+    birdnet_active: bool = False          # dokumentiert nur; Wert kommt aus shared_state
+    gpu_error: Optional[dict] = None      # {'message': str, 'kill_cmd': str} wenn Crash
 
     # ------------------------------------------------------------------
     # Walker / job queue state  (read-only view for GUI)

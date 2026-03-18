@@ -21,6 +21,7 @@ from ..gui_elements.page_header import page_header
 from ..gui_elements.section_card import section_card
 from ..gui_elements.folder_tree import FolderTree
 from ..utils import find_databases_recursive
+from ..bird_language import get_available_languages
 
 
 # ---------------------------------------------------------------------------
@@ -205,3 +206,44 @@ async def hangar() -> None:
                 ui.button('✔ Confirm', on_click=_confirm_global).props('no-caps color=primary')
 
         global_dialog.open()
+        
+    # -----------------------------------------------------------------------
+    # Section 5: Language Configuration
+    # -----------------------------------------------------------------------
+    with section_card('🌍', 'Language Configuration', 'hangar_language'):
+
+        with ui.row().classes('gap-8 items-start'):
+
+            # --- Bird name language (fully active) ---
+            with ui.column().classes('gap-1'):
+                ui.label('Bird Name Language').classes('text-caption text-grey-6 font-bold')
+                bird_lang_select = ui.select(
+                    options=get_available_languages(),
+                    value=state.bird_language_code,
+                    label='Bird Name Language',
+                    on_change=lambda e: _on_bird_lang_change(e.value),
+                ).props('outlined dense').classes('w-40')
+                ui.label('Default: de (Deutsch)').classes('text-caption text-grey-6')
+
+            # --- GUI language (not yet active) ---
+            with ui.column().classes('gap-1'):
+                ui.label('GUI Language').classes('text-caption text-grey-6 font-bold')
+                ui.select(
+                    options=['de', 'en'],
+                    value=state.gui_language_code,
+                    label='GUI Language',
+                ).props('outlined dense disable').classes('w-40')
+                ui.label('Not yet implemented').classes('text-caption text-grey-6')
+
+    def _on_bird_lang_change(lang: str) -> None:
+        available = get_available_languages()
+        if lang not in available:
+            ui.notify(
+                f"Language '{lang}' not available, resetting to 'de'",
+                type='warning',
+            )
+            state.bird_language_code = 'de'
+            bird_lang_select.set_value('de')
+        else:
+            state.bird_language_code = lang
+            logger.info(f"Bird language changed to: {lang}")

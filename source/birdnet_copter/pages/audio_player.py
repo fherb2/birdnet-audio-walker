@@ -35,6 +35,7 @@ from ..db_queries import (
     query_detections,
     get_recording_date_range,
 )
+from ..bird_language import load_labels
 from ..filters import DetectionFilter
 from ..player import AudioPlayer, export_detections, export_detections_mp3
 
@@ -59,6 +60,8 @@ async def audio_player() -> None:
                   on_click=lambda: ui.navigate.to('/')) \
             .props('no-caps')
         return
+    
+    labels = load_labels(state.bird_language_code)
 
     # -----------------------------------------------------------------------
     # Page-local state
@@ -616,7 +619,8 @@ async def audio_player() -> None:
             detections = await loop.run_in_executor(
                 None,
                 lambda: query_detections(
-                    state.active_db, **det_filter.to_query_params()
+                    state.active_db, **det_filter.to_query_params(),
+                    labels=labels,
                 )
             )
         except Exception as e:
@@ -716,7 +720,6 @@ async def audio_player() -> None:
         player_obj = AudioPlayer(state.active_db, state.audio_frame_duration)
         audio_opts = state.get_audio_options()
         filter_ctx = page.get('filter_context', {})
-        lang = state.language_code
         disable_tts = (
             audio_opts['bird_name_option'] == 'none'
             and not audio_opts['say_audio_number']
@@ -739,7 +742,7 @@ async def audio_player() -> None:
                         lambda d=det, idx=i: player_obj.prepare_detection_audio_web(
                             d,
                             audio_number=idx + 1,
-                            language_code=lang,
+                            language_code=state.bird_language_code,
                             filter_context=filter_ctx,
                             audio_options=audio_opts,
                             disable_tts=disable_tts,
@@ -833,7 +836,7 @@ async def audio_player() -> None:
                 None,
                 lambda: export_detections(
                     state.active_db, export_dir, state.detections,
-                    state.language_code,
+                    state.bird_language_code,
                     page.get('filter_context', {}),
                     state.get_audio_options(),
                     state.audio_frame_duration,
@@ -856,7 +859,7 @@ async def audio_player() -> None:
                 None,
                 lambda: export_detections_mp3(
                     state.active_db, export_dir, state.detections,
-                    state.language_code,
+                    state.bird_language_code,
                     page.get('filter_context', {}),
                     state.get_audio_options(),
                     state.audio_frame_duration,

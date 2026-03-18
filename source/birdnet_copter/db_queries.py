@@ -16,10 +16,10 @@ CONFIDENCE_THRESHOLD_HIGH = 0.7  # Detections above this are "high confidence"
 def get_db_connection(db_path: Path) -> sqlite3.Connection:
     """
     Open database connection with WAL mode.
-    
+
     Args:
         db_path: Path to SQLite database
-        
+
     Returns:
         SQLite connection with Row factory for dict-like access
     """
@@ -32,16 +32,15 @@ def get_db_connection(db_path: Path) -> sqlite3.Connection:
 def get_analysis_config(db_path: Path, key: str) -> Optional[str]:
     """
     Read value from analysis_config table.
-    
+
     Args:
         db_path: Path to SQLite database
         key: Config key to read
-        
+
     Returns:
         Config value or None if not found
     """
     conn = get_db_connection(db_path)
-    
     try:
         cursor = conn.execute(
             "SELECT value FROM analysis_config WHERE key = ?",
@@ -50,7 +49,6 @@ def get_analysis_config(db_path: Path, key: str) -> Optional[str]:
         row = cursor.fetchone()
         return row['value'] if row else None
     except sqlite3.OperationalError:
-        # Table doesn't exist (old database)
         logger.warning(f"analysis_config table not found in {db_path}")
         return None
     finally:
@@ -60,29 +58,24 @@ def get_analysis_config(db_path: Path, key: str) -> Optional[str]:
 def set_analysis_config(db_path: Path, key: str, value: str) -> bool:
     """
     Schreibt/aktualisiert Wert in analysis_config Tabelle.
-    
+
     Args:
         db_path: Pfad zur Datenbank
         key: Config-Key
         value: Wert zum Speichern
-        
+
     Returns:
         True wenn erfolgreich, False bei Fehler
     """
     try:
         conn = get_db_connection(db_path)
-        
-        # INSERT OR REPLACE (upsert)
         conn.execute(
             "INSERT OR REPLACE INTO analysis_config (key, value) VALUES (?, ?)",
             (key, value)
         )
-        
         conn.commit()
         conn.close()
-        
         return True
-        
     except Exception as e:
         logger.error(f"Failed to set analysis_config '{key}': {e}")
         return False
@@ -91,15 +84,14 @@ def set_analysis_config(db_path: Path, key: str, value: str) -> bool:
 def get_all_metadata(db_path: Path) -> List[Dict]:
     """
     Lädt alle File-Metadaten aus der metadata Tabelle.
-    
+
     Returns:
         Liste von Dicts mit allen Metadata-Feldern
     """
     try:
         conn = get_db_connection(db_path)
-        
         query = """
-            SELECT 
+            SELECT
                 filename,
                 timestamp_utc,
                 timestamp_local,
@@ -118,13 +110,10 @@ def get_all_metadata(db_path: Path) -> List[Dict]:
             FROM metadata
             ORDER BY timestamp_local ASC
         """
-        
         cursor = conn.execute(query)
         results = [dict(row) for row in cursor.fetchall()]
         conn.close()
-        
         return results
-        
     except Exception as e:
         logger.error(f"Failed to load metadata: {e}")
         return []
@@ -133,10 +122,10 @@ def get_all_metadata(db_path: Path) -> List[Dict]:
 def species_list_exists(db_path: Path) -> bool:
     """
     Check if species_list table exists in database.
-    
+
     Args:
         db_path: Path to SQLite database
-        
+
     Returns:
         True if table exists, False otherwise
     """
@@ -157,78 +146,67 @@ def create_species_list_table(db_path: Path) -> bool:
     """
     Create/recreate species_list table and populate with unique species from detections.
     Includes high/low confidence counts and score for intelligent sorting.
-    
+
     Drops existing table if present, then creates new one with all unique species.
-    
+
     Args:
         db_path: Path to SQLite database
-        
+
     Returns:
         True if successful, False on error
     """
     try:
         conn = get_db_connection(db_path)
-        
-        # Drop existing table
+
         conn.execute("DROP TABLE IF EXISTS species_list")
-        
-        # Create new table with count_high, count_low, score
+
         conn.execute("""
             CREATE TABLE species_list (
                 scientific_name TEXT PRIMARY KEY,
-                local_name TEXT,
-                name_cs TEXT,
                 count_high INTEGER,
                 count_low INTEGER,
                 score REAL
             )
         """)
-        
-        # Populate from detections with counts and score
-        # Note: SQLite doesn't have POWER() function, so we use (confidence * confidence * confidence * confidence)
+
         conn.execute(f"""
-            INSERT INTO species_list (scientific_name, local_name, name_cs, count_high, count_low, score)
-            SELECT 
-                scientific_name, 
-                local_name, 
-                name_cs,
-                SUM(CASE WHEN confidence >= {CONFIDENCE_THRESHOLD_HIGH} THEN 1 ELSE 0 END) as count_high,
-                SUM(CASE WHEN confidence < {CONFIDENCE_THRESHOLD_HIGH} THEN 1 ELSE 0 END) as count_low,
-                SUM(confidence * confidence * confidence * confidence) as score
+            INSERT INTO species_list (scientific_name, count_high, count_low, score)
+            SELECT
+                scientific_name,
+                SUM(CASE WHEN confidence >= {CONFIDENCE_THRESHOLD_HIGH} THEN 1 ELSE 0 END),
+                SUM(CASE WHEN confidence < {CONFIDENCE_THRESHOLD_HIGH} THEN 1 ELSE 0 END),
+                SUM(confidence * confidence * confidence * confidence) AS score
             FROM detections
-            GROUP BY scientific_name, local_name, name_cs
+            GROUP BY scientific_name
             ORDER BY score DESC
         """)
-        
+
         conn.commit()
-        
-        # Get count for logging
+
         cursor = conn.execute("SELECT COUNT(*) FROM species_list")
         count = cursor.fetchone()[0]
-        
         conn.close()
-        
+
         logger.info(f"Created species_list table with {count} unique species")
         return True
-        
+
     except Exception as e:
         logger.error(f"Failed to create species_list table: {e}")
-        return False    
-    
+        return False
+
 
 def get_species_count(db_path: Path) -> int:
     """
     Get number of species in species_list table.
-    
+
     Args:
         db_path: Path to SQLite database
-        
+
     Returns:
         Number of species, or 0 if table doesn't exist
     """
     if not species_list_exists(db_path):
         return 0
-    
     try:
         conn = get_db_connection(db_path)
         cursor = conn.execute("SELECT COUNT(*) FROM species_list")
@@ -240,109 +218,114 @@ def get_species_count(db_path: Path) -> int:
         return 0
 
 
-def get_available_species(db_path: Path) -> List[Tuple[str, str]]:
+def get_available_species(db_path: Path) -> List[str]:
     """
     Get list of all available species from species_list table.
     Falls back to detections table if species_list doesn't exist.
-    
+
     Returns:
-        List of tuples: [(scientific_name, local_name), ...]
-        Sorted alphabetically by scientific name
+        List of scientific_name strings, sorted alphabetically.
+        Translation to local names is done by the caller via labels dict.
     """
     try:
         conn = get_db_connection(db_path)
-        
-        # Try species_list first
+
         if species_list_exists(db_path):
             query = """
-                SELECT scientific_name, local_name
+                SELECT scientific_name
                 FROM species_list
                 ORDER BY scientific_name ASC
             """
         else:
-            # Fallback to detections (slower)
-            logger.warning("species_list table not found, falling back to detections table")
             query = """
-                SELECT DISTINCT scientific_name, local_name
+                SELECT DISTINCT scientific_name
                 FROM detections
                 ORDER BY scientific_name ASC
             """
-        
+
         cursor = conn.execute(query)
-        results = [(row[0], row[1] or row[0]) for row in cursor.fetchall()]
+        results = [row[0] for row in cursor.fetchall()]
         conn.close()
-        
         return results
-        
+
     except Exception as e:
         logger.error(f"Failed to get available species: {e}")
         return []
 
 
-def get_species_list_with_counts(db_path: Path) -> List[Dict]:
+def get_species_list_with_counts(
+    db_path: Path,
+    labels: Optional[dict] = None,
+) -> List[Dict]:
     """
     Get complete species list with detection counts and score.
-    
+
     Args:
         db_path: Path to SQLite database
-        
+        labels:  Optional dict {scientific_name: local_name} from bird_language.
+                 When provided, each result dict gets a 'local_name' key.
+                 When None, 'local_name' is absent from the result dicts.
+
     Returns:
         List of dicts with keys:
-        - scientific_name
-        - local_name
-        - name_cs
-        - count_high (detections >= threshold)
-        - count_low (detections < threshold)
-        - score (sum of confidence^4)
-        
+          - scientific_name
+          - count_high  (detections >= threshold)
+          - count_low   (detections < threshold)
+          - score       (sum of confidence^4)
+          - local_name  (only present when labels is not None)
+
         Returns empty list if species_list table doesn't exist.
     """
     if not species_list_exists(db_path):
         logger.warning("species_list table does not exist")
         return []
-    
+
     try:
         conn = get_db_connection(db_path)
-        
         query = """
-            SELECT 
+            SELECT
                 scientific_name,
-                local_name,
-                name_cs,
                 count_high,
                 count_low,
                 score
             FROM species_list
             ORDER BY score DESC
         """
-        
         cursor = conn.execute(query)
         results = [dict(row) for row in cursor.fetchall()]
         conn.close()
-        
+
+        if labels is not None:
+            for r in results:
+                r['local_name'] = labels.get(r['scientific_name'], r['scientific_name'])
+
         return results
-        
+
     except Exception as e:
         logger.error(f"Failed to get species list with counts: {e}")
         return []
     
-
-def get_detection_by_id(db_path: Path, detection_id: int) -> Optional[Dict]:
+def get_detection_by_id(
+    db_path: Path,
+    detection_id: int,
+    labels: Optional[dict] = None,
+) -> Optional[Dict]:
     """
     Load single detection with all metadata.
-    
+
     Args:
-        db_path: Path to SQLite database
+        db_path:      Path to SQLite database
         detection_id: Detection ID
-        
+        labels:       Optional dict {scientific_name: local_name}.
+                      When provided, result gets a 'local_name' key.
+
     Returns:
-        Dict with detection + metadata or None if not found
+        Dict with detection + metadata, or None if not found.
     """
     conn = get_db_connection(db_path)
-    
     try:
         cursor = conn.execute("""
-            SELECT 
+            SELECT
                 d.id as detection_id,
                 d.filename,
                 d.segment_start_utc,
@@ -351,8 +334,6 @@ def get_detection_by_id(db_path: Path, detection_id: int) -> Optional[Dict]:
                 d.segment_end_local,
                 d.timezone,
                 d.scientific_name,
-                d.local_name,
-                d.name_cs,
                 d.confidence,
                 m.timestamp_utc as file_timestamp_utc,
                 m.timestamp_local as file_timestamp_local,
@@ -365,10 +346,15 @@ def get_detection_by_id(db_path: Path, detection_id: int) -> Optional[Dict]:
             JOIN metadata m ON d.filename = m.filename
             WHERE d.id = ?
         """, (detection_id,))
-        
+
         row = cursor.fetchone()
-        return dict(row) if row else None
-        
+        if row is None:
+            return None
+        result = dict(row)
+        if labels is not None:
+            result['local_name'] = labels.get(result['scientific_name'],
+                                               result['scientific_name'])
+        return result
     finally:
         conn.close()
 
@@ -376,24 +362,21 @@ def get_detection_by_id(db_path: Path, detection_id: int) -> Optional[Dict]:
 def get_metadata_by_filename(db_path: Path, filename: str) -> Optional[Dict]:
     """
     Load file metadata.
-    
+
     Args:
-        db_path: Path to SQLite database
+        db_path:  Path to SQLite database
         filename: WAV filename
-        
+
     Returns:
         Dict with metadata or None if not found
     """
     conn = get_db_connection(db_path)
-    
     try:
-        cursor = conn.execute("""
-            SELECT * FROM metadata WHERE filename = ?
-        """, (filename,))
-        
+        cursor = conn.execute(
+            "SELECT * FROM metadata WHERE filename = ?", (filename,)
+        )
         row = cursor.fetchone()
         return dict(row) if row else None
-        
     finally:
         conn.close()
 
@@ -408,32 +391,33 @@ def query_detections(
     limit: int = 25,
     offset: int = 0,
     sort_by: str = "time",
-    sort_order: str = "asc"
+    sort_order: str = "asc",
+    labels: Optional[dict] = None,
 ) -> List[Dict]:
     """
     Query detections with filters and sorting.
-    
+
     Args:
-        db_path: Path to SQLite database
-        species: Species name (scientific, local, or Czech) - partial match
-        date_from: Start date (inclusive)
-        date_to: End date (inclusive)
-        time_range: Tuple of (start_time, end_time) for time of day filter
+        db_path:        Path to SQLite database
+        species:        Scientific name filter (partial match)
+        date_from:      Start date (inclusive)
+        date_to:        End date (inclusive)
+        time_range:     Tuple of (start_time, end_time) for time-of-day filter
         min_confidence: Minimum confidence threshold
-        limit: Maximum number of results (default: 25)
-        offset: Result offset for pagination
-        sort_by: Sort field - "time", "confidence", or "id" (default: "time")
-        sort_order: Sort order - "asc" or "desc" (default: "asc")
-        
+        limit:          Maximum number of results (default: 25)
+        offset:         Result offset for pagination
+        sort_by:        Sort field – "time", "confidence", or "id"
+        sort_order:     Sort order – "asc" or "desc"
+        labels:         Optional dict {scientific_name: local_name}.
+                        When provided, each result dict gets a 'local_name' key.
+
     Returns:
-        List of detection dicts with metadata
+        List of detection dicts with metadata.
     """
     conn = get_db_connection(db_path)
-    
     try:
-        # Build query
         query = """
-            SELECT 
+            SELECT
                 d.id as detection_id,
                 d.filename,
                 d.segment_start_utc,
@@ -442,8 +426,6 @@ def query_detections(
                 d.segment_end_local,
                 d.timezone,
                 d.scientific_name,
-                d.local_name,
-                d.name_cs,
                 d.confidence,
                 m.timestamp_utc as file_timestamp_utc,
                 m.timestamp_local as file_timestamp_local,
@@ -456,222 +438,212 @@ def query_detections(
             JOIN metadata m ON d.filename = m.filename
             WHERE 1=1
         """
-        
         params = []
-        
-        # Species filter (match scientific OR local OR Czech name)
+
         if species:
-            query += " AND (d.scientific_name LIKE ? OR d.local_name LIKE ? OR d.name_cs LIKE ?)"
-            pattern = f"%{species}%"
-            params.extend([pattern, pattern, pattern])
-        
-        # DateTime range filter (combines date + time)
+            query += " AND d.scientific_name LIKE ?"
+            params.append(f"%{species}%")
+
         if date_from:
-            # If time_range given, use it; otherwise start at 00:00:00
-            if time_range:
-                start_time = time_range[0]
-            else:
-                start_time = time(0, 0, 0)
-            
-            datetime_start = datetime.combine(date_from.date() if isinstance(date_from, datetime) else date_from, start_time)
+            start_time = time_range[0] if time_range else time(0, 0, 0)
+            datetime_start = datetime.combine(
+                date_from.date() if isinstance(date_from, datetime) else date_from,
+                start_time,
+            )
             query += " AND d.segment_start_local >= ?"
             params.append(datetime_start.isoformat())
-        
+
         if date_to:
-            # If time_range given, use it; otherwise end at 23:59:59
-            if time_range:
-                end_time = time_range[1]
-            else:
-                end_time = time(23, 59, 59)
-            
-            datetime_end = datetime.combine(date_to.date() if isinstance(date_to, datetime) else date_to, end_time)
+            end_time = time_range[1] if time_range else time(23, 59, 59)
+            datetime_end = datetime.combine(
+                date_to.date() if isinstance(date_to, datetime) else date_to,
+                end_time,
+            )
             query += " AND d.segment_start_local <= ?"
             params.append(datetime_end.isoformat())
-        
-        # Confidence filter
+
         if min_confidence is not None:
             query += " AND d.confidence >= ?"
             params.append(min_confidence)
-        
-        # Sorting - Map sort_by to actual column names
+
         sort_column_map = {
-            "time": "d.segment_start_local",
+            "time":       "d.segment_start_local",
             "confidence": "d.confidence",
-            "id": "d.id"
+            "id":         "d.id",
         }
-        
-        sort_column = sort_column_map.get(sort_by, "d.segment_start_local")
+        sort_column    = sort_column_map.get(sort_by, "d.segment_start_local")
         sort_direction = "DESC" if sort_order == "desc" else "ASC"
-        
         query += f" ORDER BY {sort_column} {sort_direction}"
-        
-        # Limit and offset
+
         query += " LIMIT ? OFFSET ?"
         params.extend([limit, offset])
-        
-        # Execute query
+
         cursor = conn.execute(query, params)
         results = [dict(row) for row in cursor.fetchall()]
-        
-        logger.debug(
-            f"Query returned {len(results)} detections "
-            f"(sort={sort_by} {sort_order})"
-        )
+
+        if labels is not None:
+            for r in results:
+                r['local_name'] = labels.get(r['scientific_name'], r['scientific_name'])
+
+        logger.debug(f"Query returned {len(results)} detections (sort={sort_by} {sort_order})")
         return results
-        
+
     finally:
         conn.close()
-        
-        
+
 
 def format_score_with_two_significant_digits(score: float, min_score: float) -> str:
     """
     Format score with adaptive precision.
-    
+
     Rules:
     - score >= 10: No decimals (e.g., "123")
     - 10 > score >= 1: 1 decimal (e.g., "9.9")
     - score < 1: 2 significant digits (e.g., "0.000075")
-    
-    Args:
-        score: Score value to format
-        min_score: Minimum score (not used in this version)
-        
-    Returns:
-        Formatted string
     """
     import math
-    
+
     if score == 0:
         return "0"
-    
     if score >= 10:
-        # No decimals
         return f"{score:.0f}"
-    
     elif score >= 1:
-        # 1 decimal place
         return f"{score:.1f}"
-    
     else:
-        # score < 1: Show 2 significant digits
-        # Calculate how many decimals needed
         magnitude = math.floor(math.log10(abs(score)))
-        decimals = -(magnitude - 1)
+        decimals  = -(magnitude - 1)
         return f"{score:.{decimals}f}"
 
 
 def format_detections_column(
-    count_high: int, 
-    count_low: int, 
-    score: float, 
-    min_score: float
+    count_high: int,
+    count_low: int,
+    score: float,
+    min_score: float,
 ) -> str:
     """
     Format detections column for display.
-    
-    Args:
-        count_high: Number of detections >= threshold
-        count_low: Number of detections < threshold
-        score: Score value
-        min_score: Minimum score of all species (for precision)
-        
+
     Returns:
-        Formatted string: "123 (45) {score: 67.8}" or "123 (45) {score: 0.0012}"
+        Formatted string: "123 (45) {score: 67.8}"
     """
     score_str = format_score_with_two_significant_digits(score, min_score)
     return f"{count_high} ({count_low}) {{score: {score_str}}}"
 
 
-def get_recording_date_range(db_path: Path) -> Tuple[Optional[datetime], Optional[datetime]]:
+def get_recording_date_range(
+    db_path: Path,
+) -> Tuple[Optional[datetime], Optional[datetime]]:
     """
     Get the date range of recordings in the database.
-    
-    Args:
-        db_path: Path to SQLite database
-        
+
     Returns:
-        Tuple of (min_date, max_date) as datetime objects
-        Returns (None, None) if no recordings found
+        Tuple of (min_date, max_date) as datetime objects.
+        Returns (None, None) if no recordings found.
     """
     try:
         conn = get_db_connection(db_path)
-        
         query = """
-            SELECT 
+            SELECT
                 MIN(timestamp_local) as min_date,
                 MAX(timestamp_local) as max_date
             FROM metadata
         """
-        
         cursor = conn.execute(query)
-        row = cursor.fetchone()
+        row    = cursor.fetchone()
         conn.close()
-        
+
         if row and row['min_date'] and row['max_date']:
-            min_date = datetime.fromisoformat(row['min_date'])
-            max_date = datetime.fromisoformat(row['max_date'])
-            return (min_date, max_date)
-        else:
-            return (None, None)
-            
+            return (
+                datetime.fromisoformat(row['min_date']),
+                datetime.fromisoformat(row['max_date']),
+            )
+        return (None, None)
+
     except Exception as e:
         logger.error(f"Failed to get recording date range: {e}")
         return (None, None)
 
 
-def search_species_in_list(db_path: Path, search_term: str, limit: int = 10) -> List[str]:
+def search_species_in_list(
+    db_path: Path,
+    search_term: str,
+    limit: int = 10,
+    labels: Optional[dict] = None,
+) -> List[str]:
     """
-    Search species in species_list table with auto-complete.
-    
+    Search species with auto-complete.
+
+    Searches scientific_name in the DB. When labels are provided, also
+    searches local names (Python-side) and includes them in the display string.
+
     Args:
-        db_path: Path to SQLite database
-        search_term: Search term (partial match)
-        limit: Maximum number of results
-        
+        db_path:     Path to SQLite database
+        search_term: Partial match string
+        limit:       Maximum number of results
+        labels:      Optional dict {scientific_name: local_name}.
+                     When provided, search also matches local names and the
+                     display format becomes "Scientific Name (Local Name)".
+
     Returns:
-        List of formatted species strings: "Scientific Name (Local Name)"
-        Returns empty list if no matches or table doesn't exist
+        List of display strings. Internal value (scientific name) can be
+        extracted by splitting on ' (' when labels are present.
+        Returns empty list if no matches or table doesn't exist.
     """
     if not search_term or not species_list_exists(db_path):
         return []
-    
+
+    term_lower = search_term.lower()
+
     try:
         conn = get_db_connection(db_path)
-        
-        # Search in scientific, local, and Czech names
+
+        if labels is not None:
+            # Fetch more candidates so local-name matches aren't cut off
+            # before the Python-side filter runs
+            fetch_limit = limit * 10
+        else:
+            fetch_limit = limit
+
         query = """
-            SELECT scientific_name, local_name, name_cs
+            SELECT scientific_name
             FROM species_list
-            WHERE scientific_name LIKE ? 
-               OR local_name LIKE ? 
-               OR name_cs LIKE ?
+            WHERE scientific_name LIKE ?
             ORDER BY score DESC
             LIMIT ?
         """
-        
-        pattern = f"%{search_term}%"
-        cursor = conn.execute(query, (pattern, pattern, pattern, limit))
-        
-        results = []
-        for row in cursor.fetchall():
-            scientific = row['scientific_name']
-            local = row['local_name'] or ''
-            
-            # Format: "Scientific Name (Local Name)"
-            if local:
-                results.append(f"{scientific} ({local})")
-            else:
-                results.append(scientific)
-        
+        cursor = conn.execute(query, (f"%{search_term}%", fetch_limit))
+        sci_matches = [row['scientific_name'] for row in cursor.fetchall()]
         conn.close()
-        return results
-        
+
+        if labels is None:
+            return sci_matches[:limit]
+
+        # With labels: merge scientific matches with local-name matches
+        # and format as "Scientific Name (Local Name)"
+        seen: set[str] = set(sci_matches)
+        results: List[str] = []
+
+        # Build display strings for scientific matches first
+        for sci in sci_matches:
+            local = labels.get(sci, '')
+            results.append(f"{sci} ({local})" if local else sci)
+
+        # Add local-name matches not already captured by scientific search
+        for sci, local in labels.items():
+            if sci in seen:
+                continue
+            if term_lower in local.lower():
+                seen.add(sci)
+                results.append(f"{sci} ({local})")
+
+        return results[:limit]
+
     except Exception as e:
         logger.error(f"Failed to search species: {e}")
         return []
-    
-    
+
+
 def get_db_completeness(db_path: Path) -> tuple[int, int]:
     """
     Return (completed_count, total_wav_count) for a folder's database.
@@ -679,17 +651,12 @@ def get_db_completeness(db_path: Path) -> tuple[int, int]:
     completed_count: files with status 'completed' in processing_status
     total_wav_count: files in metadata table (= all WAVs ever seen by scout)
 
-    Args:
-        db_path: Path to birdnet_analysis.db
-
     Returns:
         Tuple (completed, total). Returns (0, 0) if DB not readable.
     """
     try:
         conn = get_db_connection(db_path)
-        cursor = conn.execute(
-            "SELECT COUNT(*) FROM processing_status"
-        )
+        cursor = conn.execute("SELECT COUNT(*) FROM processing_status")
         completed = cursor.fetchone()[0]
         cursor = conn.execute("SELECT COUNT(*) FROM metadata")
         total = cursor.fetchone()[0]
@@ -712,6 +679,5 @@ def get_db_min_confidence(db_path: Path) -> Optional[float]:
         return float(val) if val is not None else None
     except ValueError:
         return None
-
-
-   
+    
+    

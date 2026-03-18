@@ -42,16 +42,16 @@ class SpeciesSearch:
         on_select: Optional[Callable[[Optional[str]], None]] = None,
         initial_value: Optional[str] = None,
         placeholder: str = 'Search species… (type to filter)',
+        labels: Optional[dict] = None,
     ) -> None:
         self._db_path = db_path
         self._on_select = on_select
         self._value: Optional[str] = initial_value   # scientific name
+        self._labels: Optional[dict] = labels
         self._menu: Optional[ui.menu] = None
         self._input: Optional[ui.input] = None
         self._active_label: Optional[ui.label] = None
         self._container: Optional[ui.element] = None
-
-        self._render(placeholder)
 
     # ------------------------------------------------------------------
     # Public API
@@ -72,6 +72,10 @@ class SpeciesSearch:
     def set_db(self, db_path: Optional[Path]) -> None:
         """Update the database path (e.g. after DB switch)."""
         self._db_path = db_path
+        
+    def set_labels(self, labels: Optional[dict]) -> None:
+        """Update labels dict (e.g. after language change)."""
+        self._labels = labels
 
     # ------------------------------------------------------------------
     # Rendering
@@ -121,7 +125,9 @@ class SpeciesSearch:
 
     def _show_active(self, scientific_name: str) -> None:
         """Switch to 'species selected' display."""
-        self._active_label.set_text(f'🔍 {scientific_name}')
+        local = self._labels.get(scientific_name, '') if self._labels else ''
+        display = f'🔍 {local} ({scientific_name})' if local else f'🔍 {scientific_name}'
+        self._active_label.set_text(display)
         self._active_row.set_visibility(True)
         self._input_col.set_visibility(False)
         if self._menu:
@@ -146,7 +152,7 @@ class SpeciesSearch:
                 self._menu.close()
             return
 
-        results = search_species_in_list(self._db_path, term, limit=10)
+        results = search_species_in_list(self._db_path, term, limit=10, labels=self._labels)
         self._menu.clear()
 
         if not results:

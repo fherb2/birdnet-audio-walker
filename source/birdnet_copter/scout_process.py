@@ -25,9 +25,7 @@ from .birdnet_analyzer import (
     analyze_file,
     extract_embeddings,
     calculate_segment_times,
-    find_needed_segments,
-    filter_and_write_embeddings,
-    match_embeddings_to_detections,
+    write_embeddings_to_hdf5,
 )
 from .config import (
     DEFAULT_CONFIDENCE,
@@ -46,7 +44,6 @@ from .database import (
     rebuild_detections,
 )
 from .db_queries import set_analysis_config
-from .birdnet_labels import load_birdnet_labels
 from .job_queue import (
     QueueBundle,
     ScanJob,
@@ -74,30 +71,6 @@ def _capture_tf_output():
         sys.stderr = old_stderr
 
 
-def _lookup_species(scientific_name: str,
-                    translation_list: list[dict],
-                    birdnet_labels: dict) -> dict:
-    """
-    Translate scientific name to local and Czech name.
-
-    Args:
-        scientific_name:  BirdNET scientific name
-        translation_list: List of dicts with keys 'scientific', 'de', 'cs', 'en'
-                          (converted from the karlincam DataFrame in main.py)
-        birdnet_labels:   Dict {scientific_name: local_name} for selected language
-
-    Returns:
-        Dict with keys 'scientific', 'local', 'cs'
-    """
-    local_name = birdnet_labels.get(scientific_name, scientific_name)
-
-    cs_name = scientific_name  # fallback
-    for row in translation_list:
-        if row.get('scientific') == scientific_name:
-            cs_name = row.get('cs', scientific_name)
-            break
-
-    return {'scientific': scientific_name, 'local': local_name, 'cs': cs_name}
 
 
 def _send_progress(bundle: QueueBundle, job: ScanJob) -> None:
@@ -172,12 +145,9 @@ def _block_until_resume(bundle: QueueBundle,
 def _process_folder(
     job: ScanJob,
     bundle: QueueBundle,
-    translation_list: list[dict],
-    birdnet_labels: dict,
     use_gpu: bool,
     stop_flag: list[bool],
-    wait_flag: list[bool],
-    language_code: str,
+    wait_flag: list[bool]
 ) -> None:
     """
     Process all WAV files in job.folder_path.
@@ -228,7 +198,7 @@ def _process_folder(
     # --- files not yet completed ---
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
-    cursor.execute("SELECT filename FROM processing_status WHERE status = 'completed'")
+    cursor.execute("SELECT filename FROM processing_status")
     completed = {row[0] for row in cursor.fetchall()}
     conn.close()
 
@@ -261,8 +231,6 @@ def _process_folder(
     from .db_queries import get_analysis_config
     if get_analysis_config(db_path, 'min_confidence') is None:
         set_analysis_config(db_path, 'min_confidence', str(job.min_conf))
-    if get_analysis_config(db_path, 'local_name_shortcut') is None:
-        set_analysis_config(db_path, 'local_name_shortcut', language_code)
 
     # --- GPU/CPU device string ---
     device = 'GPU' if use_gpu else 'CPU'
@@ -281,38 +249,57 @@ def _process_folder(
 
         try:
             # --- BirdNET analysis ---
-            with _capture_tf_output():
-                detections = analyze_file(
-                    file_path,
-                    latitude=meta.get('gps_lat', 51.1657),
-                    longitude=meta.get('gps_lon', 13.7372),
-                    timestamp=meta['timestamp_utc'],
-                    min_confidence=job.min_conf,
-                    device=device,
-                )
+            bundle.shared_state['birdnet_active'] = True
+            try:
+                with _capture_tf_output():
+                    detections = analyze_file(
+                        file_path,
+                        latitude=meta.get('gps_lat', 51.1657),
+                        longitude=meta.get('gps_lon', 13.7372),
+                        timestamp=meta['timestamp_utc'],
+                        min_confidence=job.min_conf,
+                        device=device,
+                    )
+            finally:
+                bundle.shared_state['birdnet_active'] = False
 
             # --- embeddings (optional) ---
             if job.scan_embeddings:
                 try:
-                    emb_result      = extract_embeddings(
-                        file_path,
-                        overlap_duration_s=OVERLAP_DURATION_S,
-                        batch_size=BATCH_SIZE,
-                        device=device,
-                    )
-                    emb_array       = emb_result.embeddings[0]
-                    segment_times   = calculate_segment_times(
-                        len(emb_array),
+                    bundle.shared_state['birdnet_active'] = True
+                    try:
+                        emb_result = extract_embeddings(
+                            file_path,
+                            overlap_duration_s=OVERLAP_DURATION_S,
+                            batch_size=BATCH_SIZE,
+                            device=device,
+                        )
+                    finally:
+                        bundle.shared_state['birdnet_active'] = False
+
+                    emb_array  = emb_result.embeddings[0]  # shape (n_segments, 1024)
+                    delta_t    = emb_result.segment_duration_s
+                    step_width = emb_result.segment_duration_s - emb_result.overlap_duration_s
+
+                    # Build full array with zero vectors for segments without detections
+                    n_segments = emb_array.shape[0]
+                    segment_times = calculate_segment_times(
+                        n_segments,
                         emb_result.segment_duration_s,
                         emb_result.overlap_duration_s,
                     )
-                    index_mapping   = find_needed_segments(detections, segment_times)
-                    emb_start_idx   = filter_and_write_embeddings(
-                        emb_array, index_mapping, hdf5_path
+
+                    # Write to HDF5 (full array, zeros for empty segments)
+                    write_embeddings_to_hdf5(
+                        hdf5_path=hdf5_path,
+                        filename=filename,
+                        file_start_utc=meta['timestamp_utc'],
+                        embeddings_array=emb_array,
+                        segment_times=segment_times,
+                        delta_t=delta_t,
+                        step_width=step_width,
                     )
-                    detections      = match_embeddings_to_detections(
-                        detections, segment_times, index_mapping, emb_start_idx
-                    )
+
                 except Exception as e:
                     logger.error(f"Walker: embedding extraction failed for {filename}: {e}")
                     job.files_done += 1
@@ -320,13 +307,11 @@ def _process_folder(
                     continue
 
             # --- write to DB ---
-            _batch_insert(
+            batch_insert_detections(
                 db_path=str(db_path),
                 filename=filename,
                 metadata=meta,
                 detections=detections,
-                translation_list=translation_list,
-                birdnet_labels=birdnet_labels,
             )
             # Mark file as completed (with or without detections)
             set_file_status(str(db_path), filename, 'completed')
@@ -357,64 +342,13 @@ def _process_folder(
     logger.info(f"Scout: folder done – {job.files_done}/{job.files_total} files: {folder_path}")
 
 
-def _batch_insert(
-    db_path: str,
-    filename: str,
-    metadata: dict,
-    detections: list[dict],
-    translation_list: list[dict],
-    birdnet_labels: dict,
-) -> None:
-    """
-    Wrapper around database.batch_insert_detections that converts
-    translation_list (list of dicts) to the pandas-free path by resolving
-    species names here and passing pre-resolved names.
-
-    We avoid importing pandas in the walker process for this lookup.
-    Instead we replicate the minimal logic of translate_species_name().
-    """
-    # Pre-resolve all scientific names that appear in detections
-    resolved: dict[str, dict] = {}
-    for det in detections:
-        sn = det['scientific_name']
-        if sn not in resolved:
-            resolved[sn] = _lookup_species(sn, translation_list, birdnet_labels)
-
-    # Patch detections with pre-resolved names so batch_insert_detections
-    # receives dicts that already have 'local_name' and 'name_cs'.
-    # batch_insert_detections calls translate_species_name() internally –
-    # we pass a dummy translation_table and override with a patched birdnet_labels.
-    import pandas as pd
-    empty_df = pd.DataFrame(columns=['scientific', 'en', 'de', 'cs'])
-
-    # Build a labels dict that maps scientific → local (already resolved)
-    patched_labels = {sn: info['local'] for sn, info in resolved.items()}
-
-    # Build a minimal translation DataFrame with cs names
-    rows = [{'scientific': sn, 'en': '', 'de': info['local'], 'cs': info['cs']}
-            for sn, info in resolved.items()]
-    translation_df = pd.DataFrame(rows) if rows else empty_df
-
-    batch_insert_detections(
-        db_path,
-        filename,
-        metadata,
-        detections,
-        translation_df,
-        patched_labels,
-    )
-
-
 # ---------------------------------------------------------------------------
 # Scout process entry point
 # ---------------------------------------------------------------------------
 
 def run_scout_process(
     bundle: QueueBundle,
-    translation_list: list[dict],
-    birdnet_labels: dict,
     use_gpu: bool,
-    language_code: str,
 ) -> None:
     """
     Scout background process entry point.
@@ -423,11 +357,8 @@ def run_scout_process(
     Exits cleanly when SIGNAL_SHUTDOWN (None) is received.
 
     Args:
-        bundle:           QueueBundle created by create_queues() in main process
-        translation_list: Species translation data as list of dicts
-                          (converted from karlincam DataFrame in main.py)
-        birdnet_labels:   Dict {scientific_name: local_name} for selected language
-        use_gpu:          If True, BirdNET uses GPU; otherwise CPU
+        bundle:  QueueBundle created by create_queues() in main process
+        use_gpu: If True, BirdNET uses GPU; otherwise CPU
     """
     logger.info("Scout process started")
 
@@ -470,12 +401,9 @@ def run_scout_process(
             _process_folder(
                 job=job,
                 bundle=bundle,
-                translation_list=translation_list,
-                birdnet_labels=birdnet_labels,
                 use_gpu=use_gpu,
                 stop_flag=stop_flag,
-                wait_flag=wait_flag,
-                language_code=language_code,
+                wait_flag=wait_flag
             )
         except Exception as e:
             logger.error(f"Scout: unhandled exception in job {job.job_id[:8]}: {e}")
