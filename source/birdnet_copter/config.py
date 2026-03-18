@@ -33,10 +33,8 @@ HDF5_CHUNK_SIZE = 1000                       # Chunk size for HDF5 (rows per chu
 # ============================================================================
 
 
-# Species Translation
-SPECIES_CACHE_DIR = "/tmp"
-SPECIES_CACHE_MAX_AGE_DAYS = 7
-SPECIES_TABLE_URL = "https://www.karlincam.cz/de_de/und-sonst-noch/artennamen-uebersetzen/vogelnamen-wissenschaftlich-sortiert"
+# Bird Name Languages (local overrides, take priority over BirdNET bundled labels)
+BIRD_LANGUAGES_PATH = Path.home() / ".local/share/birdnet-play/bird_languages"
 
 # Index Management
 INDEX_NAMES = [
@@ -48,7 +46,6 @@ INDEX_NAMES = [
 # BirdNET Model
 BIRDNET_MODEL_PATH = Path.home() / ".local/share/birdnet/acoustic-models/v2.4/"
 BIRDNET_LABELS_PATH = Path.home() / ".local/share/birdnet/acoustic-models/v2.4/pb/labels"
-DEFAULT_LANGUAGE = "de"
 
 # BirdNET Model Download
 BIRDNET_DOWNLOAD_MAX_RETRIES = 2

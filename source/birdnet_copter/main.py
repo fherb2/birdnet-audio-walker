@@ -25,11 +25,9 @@ from .app_state import AppState
 from .hardware import detect_hardware
 from .job_queue import create_queues, shutdown_scouting, QueueBundle
 from .scout_process import run_scout_process
-from .birdnet_labels import get_available_languages, load_birdnet_labels
-from .species_translation import download_species_table
-from .config import DEFAULT_LANGUAGE
 from .utils import find_databases_recursive
-from .db_queries import get_analysis_config, create_species_list_table
+from .db_queries import create_species_list_table
+from .scout_watchdog import run_watchdog
 
 
 # ---------------------------------------------------------------------------
@@ -50,10 +48,8 @@ async def _startup_tasks(app_state: AppState) -> None:
 
     app_state.active_db = app_state.available_dbs[0]
     logger.info(f"Active database: {app_state.active_db}")
-
-    lang = get_analysis_config(app_state.active_db, 'local_name_shortcut')
-    app_state.language_code = lang if lang else 'de'
-    logger.info(f"Language: {app_state.language_code}")
+    # Bird language stays at default 'de' – configurable via Hangar
+    logger.info(f"Bird language: {app_state.bird_language_code}")
 
 
 # ---------------------------------------------------------------------------
@@ -62,33 +58,17 @@ async def _startup_tasks(app_state: AppState) -> None:
 
 def _start_scouting(
     bundle: QueueBundle,
-    translation_list: list[dict],
-    birdnet_labels: dict,
     use_gpu: bool,
-    language_code: str,
 ) -> multiprocessing.Process:
-    """
-    Spawn the scout background process.
-
-    Args:
-        bundle:           QueueBundle from create_queues()
-        translation_list: Species translation as list of dicts
-        birdnet_labels:   Dict {scientific_name: local_name}
-        use_gpu:          If True, BirdNET uses GPU
-
-    Returns:
-        Started Process object.
-    """
     p = multiprocessing.Process(
         target=run_scout_process,
-        args=(bundle, translation_list, birdnet_labels, use_gpu, language_code),
+        args=(bundle, use_gpu),
         name="scouting_flight",
         daemon=False,
     )
     p.start()
     logger.info(f"Scout process started (pid={p.pid})")
     return p
-
 
 def start_scout_process(bundle: QueueBundle) -> None:
     """
@@ -103,10 +83,7 @@ def start_scout_process(bundle: QueueBundle) -> None:
     app_state: AppState = app.state.app_state
     p = _start_scouting(
         bundle=bundle,
-        translation_list=app.state.translation_list,
-        birdnet_labels=app.state.birdnet_labels,
         use_gpu=app_state.use_gpu,
-        language_code=app_state.language_code,
     )
     app.state.scout_process = p
     logger.info("Scout process started on demand")
@@ -174,25 +151,6 @@ def main() -> int:
     # --- Queues ---
     bundle = create_queues(shared_state)
 
-    # --- Species translation + BirdNET labels ---
-    logger.info("Loading species translation table...")
-    translation_df = download_species_table()
-    translation_list: list[dict] = translation_df.to_dict(orient='records')
-
-    logger.info(f"Loading BirdNET labels (language: {DEFAULT_LANGUAGE})...")
-    available_langs = get_available_languages()
-    if not available_langs:
-        logger.error("No BirdNET label files found. Is the BirdNET model installed?")
-        return 1
-    birdnet_labels = load_birdnet_labels(DEFAULT_LANGUAGE)
-    if not birdnet_labels:
-        logger.error(f"Failed to load BirdNET labels for language '{DEFAULT_LANGUAGE}'")
-        return 1
-
-    # Scout process is started on demand from Scouting Flight (▶ Take off button)
-    app.state.translation_list = translation_list
-    app.state.birdnet_labels   = birdnet_labels
-
     # --- Signal handlers ---
     def _signal_handler(signum, frame):
         logger.warning(f"Signal {signum} received – initiating shutdown")
@@ -216,6 +174,13 @@ def main() -> int:
 
     async def _on_startup():
         asyncio.create_task(_startup_tasks(app_state))
+        asyncio.create_task(
+            run_watchdog(
+                app_state=app_state,
+                bundle=bundle,
+                get_scout_process=lambda: getattr(app.state, 'scout_process', None),
+            )
+        )
 
     app.on_startup(_on_startup)
 

@@ -1,0 +1,23 @@
+Birdnet-Copter ist eine Anwendung, um
+
+- Audio-Files mit Birdnet-Modellen zu analysieren
+- Dies in einer Audio-Ordner-Hirarchie lokal, wie global gleichzeitig zu tun
+- Die Erkennungsergebnisse zusammen mit den zugehörigen Audio-Schnippseln zu untersuchen.
+- Mit Hilfe der zugehörigen Embedding-Vektoren die Klassifizierung der Sounds tiefer zu untersuchen.
+
+Analyse-Daten und Audio-Daten werden gemeinsam und eindeutig zugeordnet gehandhabt. 
+
+-> Sie können jederzeit um weitere Audio- und Analysedaten erweitert werden kann.
+-> Der Birdnet-Copter behält den Überblick über alle Audiodaten und Erkennung.
+
+Eine große Datenbank besteht aus kleinen, hierarisch angeordneten Audio-Ordner, die selbst für sich eine Datenbank darstellen, aber in der die Hierarchie der Ordner zu einer großen, umfassenden Datenbank zusammengefasst analysiert werden kann. Das kleinste Element ist ein Ordner von Audiofiles. Weitere Daten, z.B. konkret aus der Feldforschung können in diesenm Ordnern liegen.
+
+Mit Birdnet-Copter können sie die Audiofiles einer solchen Hierarchie zuerst lokal um eine Erkennungs-Datenbank erweitern. Die können dann augewählte Ordner zu einer globalern virtuellen Datenbank zusammen schleißen, um Auswertungen zu starten.
+
+Da viele Erkennungen keine wirklich klare, eindeutige Zuordnung zu Spezies ergeben, erlaubt die Clustersuche auf Basis der Embededding-Vektoren eine tiefere Analyse und zuordnung vieler Aufnahmen.
+
+Die Anwendung ist für Docker vorbereitet. Das heißt, sie können auf verschiedenen System vorkonfiguriert immer in der gleichen Art anwenden. Die Hardware des jeweiloigen Systems bestimmt die Leistung insbesondere bei der Erkennung von Spezies in Audiofiles. Es ist kein Problem die Anwendung in einem Doker-Container lokal laufen zu lassen oder auf einem System remote, dass über bestimmte höhere Leistungen bezüglich GPU-Berechnungen verfügt. Das User Interface ist als Web-Frontend gestaltet, damit die Bedienung völlig unabhängig von der Verteilung auf Hardware erfolgen kann.
+
+Die Anwendung ist über das grafische Interface in mehrere Teile aufgeteilt, das symbolisch mit Begriffen eines Forschungshubschraubers benannt wird:
+
+Hangar – Hier sehen sie die technischen Möglichkeites Ihres Systems und können die "Wurzel" der Ablage Ihrer Audio- und Datenbankfiles festlegen. Auf den anderen Seiten der GUI arbeiten sie dann immer unterhgalb dieses Punktes. Sie sehen, ob die GPU zur Beschleunigung zur Verfügung steht und können festlegen, ob sie sie auch wirklich verwenden wollen.

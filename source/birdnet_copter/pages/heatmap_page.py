@@ -28,6 +28,7 @@ from ..gui_elements.section_card import section_card
 from ..gui_elements.species_search import SpeciesSearch
 from ..player import AudioPlayer
 from ..db_queries import query_detections, get_recording_date_range
+from ..bird_language import load_labels
 
 import uuid
 from nicegui import app as _nicegui_app
@@ -302,6 +303,8 @@ async def heatmap_page() -> None:
             .props("no-caps")
         return
 
+    labels = load_labels(state.bird_language_code)
+
     # ------------------------------------------------------------------
     # Page-local mutable state (dict avoids closure rebinding issues)
     # ------------------------------------------------------------------
@@ -330,6 +333,7 @@ async def heatmap_page() -> None:
                     db_path=state.active_db,
                     on_select=lambda s: setattr(state, "hm_filter_species", s),
                     initial_value=state.hm_filter_species,
+                    labels=labels,
                 )
 
                 def _on_conf_change(e):
@@ -437,6 +441,7 @@ async def heatmap_page() -> None:
                         offset=0,
                         sort_by="time",
                         sort_order="asc",
+                        labels=labels,
                     ),
                 )
             except Exception as exc:
@@ -687,6 +692,7 @@ async def _open_click_dialog(
                             limit=DIALOG_MAX_DETECTIONS,
                             sort_by="confidence",
                             sort_order="desc",
+                            labels=labels,
                         ),
                     )
                     
