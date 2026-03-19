@@ -22,6 +22,7 @@ from ..gui_elements.section_card import section_card
 from ..gui_elements.folder_tree import FolderTree
 from ..utils import find_databases_recursive
 from ..bird_language import get_available_languages
+from ..task_status import run_with_loading
 
 
 # ---------------------------------------------------------------------------
@@ -48,42 +49,44 @@ async def hangar() -> None:
         if hw is None:
             ui.label('Hardware info not available.').classes('text-caption text-grey-6')
         else:
-            with ui.grid(columns=2).classes('gap-x-8 gap-y-1'):
+            with ui.row().classes('items-start gap-8'):
+                ui.image('static/icons/favicon.svg').classes('h-auto').style('width: 80px;')
+                with ui.grid(columns=2).classes('gap-x-8 gap-y-1'):
 
-                # GPU
-                ui.label('GPU').classes('text-caption text-grey-6 font-bold')
-                if hw.has_nvidia_gpu and hw.gpu_name:
-                    parts = [hw.gpu_name]
-                    if hw.gpu_vram_gb is not None:
-                        parts.append(f'{hw.gpu_vram_gb:.0f} GB VRAM')
-                    if hw.gpu_shaders is not None:
-                        parts.append(f'{hw.gpu_shaders} shaders')
-                    ui.label(', '.join(parts)).classes('text-body2')
-                else:
-                    ui.label('no NVIDIA GPU').classes('text-body2 text-grey-6')
+                    # GPU
+                    ui.label('GPU').classes('text-caption text-grey-6 font-bold')
+                    if hw.has_nvidia_gpu and hw.gpu_name:
+                        parts = [hw.gpu_name]
+                        if hw.gpu_vram_gb is not None:
+                            parts.append(f'{hw.gpu_vram_gb:.0f} GB VRAM')
+                        if hw.gpu_shaders is not None:
+                            parts.append(f'{hw.gpu_shaders} shaders')
+                        ui.label(', '.join(parts)).classes('text-body2')
+                    else:
+                        ui.label('no NVIDIA GPU').classes('text-body2 text-grey-6')
 
-                # CPU
-                ui.label('CPU').classes('text-caption text-grey-6 font-bold')
-                ui.label(
-                    f'{hw.cpu_count_logical} logical cores'
-                    f' ({hw.cpu_count_physical} physical)'
-                ).classes('text-body2')
+                    # CPU
+                    ui.label('CPU').classes('text-caption text-grey-6 font-bold')
+                    ui.label(
+                        f'{hw.cpu_count_logical} logical cores'
+                        f' ({hw.cpu_count_physical} physical)'
+                    ).classes('text-body2')
 
-                # RAM
-                ui.label('RAM').classes('text-caption text-grey-6 font-bold')
-                ui.label(f'{hw.ram_total_gb:.0f} GB').classes('text-body2')
+                    # RAM
+                    ui.label('RAM').classes('text-caption text-grey-6 font-bold')
+                    ui.label(f'{hw.ram_total_gb:.0f} GB').classes('text-body2')
 
-                # Cores for inference
-                ui.label('Cores for inference').classes('text-caption text-grey-6 font-bold')
-                note = ' ⚠ sleep mode active' if hw.sleep_flag else ''
-                ui.label(
-                    f'{hw.cpu_count_for_inference}{note}'
-                ).classes('text-body2' + (' text-orange-7' if hw.sleep_flag else ''))
+                    # Cores for inference
+                    ui.label('Cores for inference').classes('text-caption text-grey-6 font-bold')
+                    note = ' ⚠ sleep mode active' if hw.sleep_flag else ''
+                    ui.label(
+                        f'{hw.cpu_count_for_inference}{note}'
+                    ).classes('text-body2' + (' text-orange-7' if hw.sleep_flag else ''))
 
     # -----------------------------------------------------------------------
     # Section 2: Root Path
     # -----------------------------------------------------------------------
-    with section_card('🌍', 'Flying Area: Root Path / Global DB Path', 'hangar_root_path'):
+    with section_card('🌍', 'Flying Area: Root Path', 'hangar_root_path'):
         root_label = ui.label(str(state.root_path)).classes('text-body2 text-grey-10 q-mb-xs')
         root_dialog_btn = ui.button('📁 Change', on_click=lambda: asyncio.create_task(_open_root_dialog())).props('no-caps')
 
@@ -112,8 +115,13 @@ async def hangar() -> None:
                         return
                     state.root_path = new_root
                     root_label.set_text(str(new_root))
-                    loop = asyncio.get_event_loop()
-                    dbs = await loop.run_in_executor(None, find_databases_recursive, new_root)
+                    dbs = await run_with_loading(
+                        root_dialog_btn,
+                        find_databases_recursive,
+                        new_root,
+                        shared_state=state.shared_state,
+                        label='Scanning folders…',
+                    )
                     state.available_dbs = dbs
                     state.active_db = dbs[0] if dbs else None
                     logger.info(f'Root path changed to: {new_root}')

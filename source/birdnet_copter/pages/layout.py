@@ -21,6 +21,22 @@ from ..app_state import AppState
 
 
 # ---------------------------------------------------------------------------
+# Header size configuration  ('sm' | 'md' | 'lg')
+# ---------------------------------------------------------------------------
+HEADER_SIZE = 'md'
+
+# Spinner-Icon static and animated
+ICON_STATIC   = 'static/icons/birdnet_copter_spinner_static.svg'
+ICON_ANIMATED = 'static/icons/birdnet_copter_spinner_animated.svg'
+
+_HEADER_SIZES = {
+    'sm': {'py': 'py-1', 'icon': 'w-5 h-5',  'title': 'text-h6', 'body': 'text-body2', 'caption': 'text-caption', 'spinner': 'sm'},
+    'md': {'py': 'py-3', 'icon': 'w-8 h-8',  'title': 'text-h5', 'body': 'text-body1', 'caption': 'text-body2',   'spinner': 'md'},
+    'lg': {'py': 'py-5', 'icon': 'w-10 h-10', 'title': 'text-h4', 'body': 'text-h6',   'caption': 'text-body1',   'spinner': 'lg'},
+}
+
+
+# ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
@@ -107,9 +123,11 @@ def create_layout(app_state: AppState) -> ui.left_drawer:
     # Header
     # ------------------------------------------------------------------
     initial_color = 'bg-red-8' if app_state.gpu_error else 'bg-primary'
+    
+    hs = _HEADER_SIZES[HEADER_SIZE]
 
     with ui.header().classes(
-        f'items-center justify-between {initial_color} text-white px-4 py-1'
+        f'items-center justify-between {initial_color} text-white px-4 {hs["py"]}'
     ) as header:
 
         # Grid with 3 equal columns, all vertically centered
@@ -119,22 +137,20 @@ def create_layout(app_state: AppState) -> ui.left_drawer:
             with ui.row().classes('items-center gap-2'):
                 ui.button(icon='menu', on_click=nav_drawer.toggle) \
                     .props('flat dense round color=white')
-                ui.label('birdnet-copter').classes('text-h6 font-bold')
+                header_icon = ui.image(ICON_STATIC).classes(hs['icon'])
+                ui.label('birdnet-copter').classes(f'{hs["title"]} font-bold')
 
             # --- center column: paths ---
             with ui.column().classes('items-center gap-0'):
                 root_label = ui.label(str(app_state.root_path)) \
-                    .classes('text-caption opacity-80')
+                    .classes(f'{hs["caption"]} opacity-80')
                 db_label = ui.label(_relative_db_label(app_state)) \
-                    .classes('text-body2 font-bold')
+                    .classes(f'{hs["body"]} font-bold')
 
             # --- right column: access mode + spinner ---
             with ui.row().classes('items-center justify-end gap-3'):
-                with ui.row().classes('items-center gap-1') as spinner_row:
-                    spinner = ui.spinner(size='sm').classes('text-white')
-                    ui.label('processing…').classes('text-caption')
                 access_text = '🔒 read-only' if app_state.read_only else '✏️ read-write'
-                ui.label(access_text).classes('text-caption')
+                ui.label(access_text).classes(hs['caption'])
 
         # GPU error button – outside the grid so it doesn't affect row height
         gpu_err_btn = ui.button(
@@ -149,8 +165,8 @@ def create_layout(app_state: AppState) -> ui.left_drawer:
 
     def _update_spinner():
         try:
-            running = app_state.audio_generation_running
-            spinner_row.set_visibility(running)
+            running = app_state.is_busy()
+            header_icon.set_source(ICON_ANIMATED if running else ICON_STATIC)
         except Exception:
             pass
 
@@ -172,9 +188,9 @@ def create_layout(app_state: AppState) -> ui.left_drawer:
             has_error = bool(app_state.gpu_error)
             # Switch header color
             if has_error:
-                header.classes(replace='items-center justify-between bg-red-8 text-white px-4 py-1')
+                header.classes(replace=f'items-center justify-between bg-red-8 text-white px-4 {hs["py"]}')
             else:
-                header.classes(replace='items-center justify-between bg-primary text-white px-4 py-1')
+                header.classes(replace=f'items-center justify-between bg-primary text-white px-4 {hs["py"]}')
             # Show / hide error button
             gpu_err_btn.set_visibility(has_error)
         except Exception:

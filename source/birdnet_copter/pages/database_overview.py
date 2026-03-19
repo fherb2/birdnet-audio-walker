@@ -28,6 +28,7 @@ from shared.db_queries import (
     get_recording_date_range,
 )
 from ..bird_language import load_labels
+from ..task_status import run_with_loading
 
 
 # ---------------------------------------------------------------------------
@@ -187,9 +188,12 @@ async def database_overview() -> None:
         act_spinner.set_visibility(True)
         act_status.set_text('Updating…')
         try:
-            loop = asyncio.get_event_loop()
-            success = await loop.run_in_executor(
-                None, create_species_list_table, state.active_db
+            success = await run_with_loading(
+                act_btn,
+                create_species_list_table,
+                state.active_db,
+                shared_state=state.shared_state,
+                label='Building species list…',
             )
             if success:
                 count = get_species_count(state.active_db)
@@ -202,7 +206,6 @@ async def database_overview() -> None:
             act_status.set_text(f'❌ Error: {e}')
         finally:
             page['actualize_running'] = False
-            act_btn.enable()
             act_spinner.set_visibility(False)
 
     ui.separator().classes('q-my-md')

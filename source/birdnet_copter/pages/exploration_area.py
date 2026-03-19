@@ -39,6 +39,7 @@ from ..db_queries import (
     get_recording_date_range,
 )
 from ..bird_language import load_labels
+from ..task_status import run_with_loading
 
 
 # ---------------------------------------------------------------------------
@@ -221,9 +222,12 @@ async def exploration_area() -> None:
             return
         page['actualize_running'] = True
         try:
-            loop = asyncio.get_event_loop()
-            success = await loop.run_in_executor(
-                None, create_species_list_table, db
+            success = await run_with_loading(
+                [],
+                create_species_list_table,
+                db,
+                shared_state=state.shared_state,
+                label='Building species list…',
             )
             if success:
                 _refresh_db_info()

@@ -38,6 +38,7 @@ from ..db_queries import (
 from ..bird_language import load_labels
 from ..filters import DetectionFilter
 from ..player import AudioPlayer, export_detections, export_detections_mp3
+from ..task_status import set_task_running, TASK_AUDIO_GEN
 
 
 # ---------------------------------------------------------------------------
@@ -709,6 +710,7 @@ async def audio_player() -> None:
             return
 
         state.audio_generation_running = True
+        set_task_running(state.shared_state, TASK_AUDIO_GEN, True, 'Generating audio…')
         state.audio_generation_progress = 0.0
         n = len(state.detections)
 
@@ -820,6 +822,7 @@ async def audio_player() -> None:
             raise
         finally:
             state.audio_generation_running = False
+            set_task_running(state.shared_state, TASK_AUDIO_GEN, False, '')
             gen_progress_row.set_visibility(False)
 
     # -----------------------------------------------------------------------

@@ -29,6 +29,7 @@ from ..gui_elements.species_search import SpeciesSearch
 from ..player import AudioPlayer
 from ..db_queries import query_detections, get_recording_date_range
 from ..bird_language import load_labels
+from ..task_status import run_with_loading
 
 import uuid
 from nicegui import app as _nicegui_app
@@ -426,11 +427,9 @@ async def heatmap_page() -> None:
                 ui.notify("Date From must be ≤ Date To.", type="warning")
                 return
 
-            apply_btn.props("loading")
             try:
-                loop = asyncio.get_event_loop()
-                detections = await loop.run_in_executor(
-                    None,
+                detections = await run_with_loading(
+                    apply_btn,
                     lambda: query_detections(
                         db_path=state.active_db,
                         species=state.hm_filter_species or None,
@@ -443,11 +442,12 @@ async def heatmap_page() -> None:
                         sort_order="asc",
                         labels=labels,
                     ),
+                    shared_state=state.shared_state,
+                    label='Querying detections…',
                 )
             except Exception as exc:
                 logger.exception("Heatmap query failed")
                 ui.notify(f"Query error: {exc}", type="negative")
-                apply_btn.props(remove="loading")
                 return
 
             if not detections:
@@ -497,7 +497,6 @@ async def heatmap_page() -> None:
 
             export_btn.enable()
             download_section.set_visibility(True)
-            apply_btn.props(remove="loading")
             ui.notify(f"Heatmap updated ({len(detections)} detections).", type="positive")
 
         apply_btn = ui.button("▶ Apply Filters", on_click=_apply_filters) \

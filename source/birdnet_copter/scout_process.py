@@ -52,6 +52,7 @@ from .job_queue import (
     SIGNAL_STOP,
     SIGNAL_SHUTDOWN,
 )
+from .task_status import set_task_running, TASK_SCOUT
 
 
 # ---------------------------------------------------------------------------
@@ -361,6 +362,8 @@ def run_scout_process(
         use_gpu: If True, BirdNET uses GPU; otherwise CPU
     """
     logger.info("Scout process started")
+    
+    set_task_running(bundle.shared_state, TASK_SCOUT, False, '')
 
     stop_flag = [False]   # [0] = stop after current file
     wait_flag = [False]   # [0] = pause after current batch
@@ -395,6 +398,7 @@ def run_scout_process(
         logger.info(f"Scout: starting job {job.job_id[:8]} – {job.folder_path}")
         job.status     = 'flying'
         job.started_at = datetime.now()
+        set_task_running(bundle.shared_state, TASK_SCOUT, True, f'Analysiere: {job.folder_path.name}…')
         _send_progress(bundle, job)
 
         try:
@@ -411,7 +415,10 @@ def run_scout_process(
             job.error_msg   = str(e)
             job.finished_at = datetime.now()
             _send_progress(bundle, job)
+            
+        set_task_running(bundle.shared_state, TASK_SCOUT, False, '')
 
     logger.info("Scout process finished")
     
+    set_task_running(bundle.shared_state, TASK_SCOUT, False, '')
     
