@@ -176,4 +176,19 @@ class AppState:
         self.audio_generation_progress = 0.0
         self.audio_generation_running = False
 
-        
+    def is_busy(self) -> bool:
+        """Return True if any Type-A background task is currently running."""
+        if self.shared_state is None:
+            return False
+        tasks: dict = self.shared_state.get('tasks', {})
+        return any(t.get('running', False) for t in tasks.values())
+
+    def busy_label(self) -> str:
+        """Return the label of the first active task, or '' if none is running."""
+        if self.shared_state is None:
+            return ''
+        tasks: dict = self.shared_state.get('tasks', {})
+        for t in tasks.values():
+            if t.get('running', False):
+                return t.get('label', '')
+        return ''

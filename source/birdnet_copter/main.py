@@ -145,6 +145,12 @@ def main() -> int:
     shared_state = manager.dict()
     shared_state['jobs'] = []
     shared_state['walker_status'] = 'idle'
+    
+    from .task_status import ALL_TASK_KEYS
+    shared_state['tasks'] = {
+        key: {'running': False, 'label': '', 'progress': None}
+        for key in ALL_TASK_KEYS
+    }
 
     app_state.shared_state = shared_state
 
@@ -188,7 +194,8 @@ def main() -> int:
     from . import pages  # noqa: F401
 
     logger.info("Starting NiceGUI server on http://0.0.0.0:8090")
-    ui.run(port=8090, reload=False, show=False)
+    app.add_static_files('/static', Path(__file__).parent / 'pages' / 'static')
+    ui.run(port=8090, reload=False, show=False, favicon='/static/icons/favicon.svg')
 
     # --- Shutdown ---
     logger.info("GUI server stopped – shutting down scout process")

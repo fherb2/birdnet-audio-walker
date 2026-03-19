@@ -1,0 +1,158 @@
+<svg width="512" height="512" viewBox="0 0 680 680" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <radialGradient id="scopeGrad" cx="30%" cy="25%" r="70%">
+    <stop offset="0%"   stop-color="#1E6DB5"/>
+    <stop offset="40%"  stop-color="#0E4F8A"/>
+    <stop offset="100%" stop-color="#062040"/>
+  </radialGradient>
+</defs>
+
+<rect width="680" height="680" fill="#F5C800" rx="100"/>
+<circle cx="265" cy="360" r="175" fill="none" stroke="#1a1a1a" stroke-width="18"/>
+<path d="M 100 418 A 175 175 0 0 0 430 418 Z" fill="#1a1a1a"/>
+<path d="M 100 418 A 175 175 0 0 0 265 535 Z" fill="#555555"/>
+<path d="M 145 418 A 120 120 0 0 0 265 490 Z" fill="#1a1a1a"/>
+<path d="M 323 195 A 175 175 0 0 1 430 418 L 323 418 Z" fill="#1a1a1a"/>
+<path d="M 323 195 A 175 175 0 0 1 415 305 L 323 305 Z" fill="#555555"/>
+<path d="M 323 218 A 120 120 0 0 1 390 302 L 323 302 Z" fill="#1a1a1a"/>
+<circle cx="265" cy="360" r="175" fill="none" stroke="#1a1a1a" stroke-width="18"/>
+
+<rect x="252" y="100" width="26" height="87" rx="8" fill="#1a1a1a"/>
+<g transform="rotate(-10, 263, 103)">
+  <rect x="50"  y="92" width="210" height="22" rx="11" fill="#1a1a1a"/>
+  <rect x="258" y="92" width="210" height="22" rx="11" fill="#1a1a1a"/>
+</g>
+<circle cx="263" cy="103" r="20" fill="#F5C800"/>
+<circle cx="263" cy="103" r="9"  fill="#1a1a1a"/>
+
+<rect x="415" y="300" width="168" height="30" rx="14" fill="#1a1a1a"/>
+<rect x="558" y="214" width="28"  height="116" rx="10" fill="#1a1a1a"/>
+<rect x="536" y="206" width="98"  height="22"  rx="8"  fill="#1a1a1a"/>
+<g transform="rotate(-30, 617, 290)">
+  <path d="M 617 238 A 52 52 0 0 1 662 264 L 625 286 A 9 9 0 0 0 617 281 Z" fill="#555555"/>
+  <path d="M 617 342 A 52 52 0 0 1 572 316 L 609 295 A 9 9 0 0 0 617 299 Z" fill="#555555"/>
+</g>
+<circle cx="617" cy="290" r="20" fill="#F5C800"/>
+<circle cx="617" cy="290" r="9"  fill="#1a1a1a"/>
+
+<rect x="125" y="548" width="245" height="18" rx="9" fill="#1a1a1a"/>
+<rect x="143" y="516" width="16"  height="46" rx="5" fill="#1a1a1a"/>
+<rect x="336" y="516" width="16"  height="46" rx="5" fill="#1a1a1a"/>
+
+<!-- Copter-Auge (vor Fernrohr gezeichnet → wird überdeckt) -->
+<circle cx="200" cy="278" r="48" fill="white"/>
+<circle fill="#1a1a1a">
+  <animate attributeName="cx" dur="5s" repeatCount="indefinite"
+    calcMode="spline" keySplines="0.4 0 0.6 1;0 0 1 1;0.4 0 0.6 1"
+    keyTimes="0;0.4;0.55;1" values="218;200;200;218"/>
+  <animate attributeName="cy" dur="5s" repeatCount="indefinite"
+    calcMode="spline" keySplines="0.4 0 0.6 1;0 0 1 1;0.4 0 0.6 1"
+    keyTimes="0;0.4;0.55;1" values="287;300;300;287"/>
+  <animate attributeName="r" dur="5s" repeatCount="indefinite"
+    keyTimes="0;1" values="26;26"/>
+</circle>
+<circle fill="white">
+  <animate attributeName="cx" dur="5s" repeatCount="indefinite"
+    calcMode="spline" keySplines="0.4 0 0.6 1;0 0 1 1;0.4 0 0.6 1"
+    keyTimes="0;0.4;0.55;1" values="210;200;200;210"/>
+  <animate attributeName="cy" dur="5s" repeatCount="indefinite"
+    calcMode="spline" keySplines="0.4 0 0.6 1;0 0 1 1;0.4 0 0.6 1"
+    keyTimes="0;0.4;0.55;1" values="279;285;285;279"/>
+  <animate attributeName="r" dur="5s" repeatCount="indefinite"
+    keyTimes="0;1" values="9;9"/>
+</circle>
+
+<!-- Bewegungslinien -->
+<line x1="72"  y1="318" x2="16"  y2="318" stroke="#1a1a1a" stroke-width="8" stroke-linecap="round" opacity="0.55"/>
+<line x1="78"  y1="358" x2="16"  y2="358" stroke="#1a1a1a" stroke-width="5" stroke-linecap="round" opacity="0.4"/>
+<line x1="76"  y1="396" x2="20"  y2="396" stroke="#1a1a1a" stroke-width="3" stroke-linecap="round" opacity="0.28"/>
+
+<!-- Fernrohr Hauptfläche -->
+<path fill="url(#scopeGrad)">
+  <animate attributeName="d" dur="5s" repeatCount="indefinite"
+    calcMode="spline" keySplines="0.4 0 0.6 1;0 0 1 1;0.4 0 0.6 1"
+    keyTimes="0;0.4;0.55;1"
+    values="
+      M 236 323 L 260 277 L 626 406 L 554 544 Z;
+      M 174 278 L 226 278 L 400 500 L 0 500 Z;
+      M 174 278 L 226 278 L 400 500 L 0 500 Z;
+      M 236 323 L 260 277 L 626 406 L 554 544 Z
+    "/>
+</path>
+<path fill="#1E6DB5" opacity="0.45">
+  <animate attributeName="d" dur="5s" repeatCount="indefinite"
+    calcMode="spline" keySplines="0.4 0 0.6 1;0 0 1 1;0.4 0 0.6 1"
+    keyTimes="0;0.4;0.55;1"
+    values="
+      M 242 314 L 256 282 L 590 395 L 570 432 Z;
+      M 184 278 L 216 278 L 320 480 L 80 480 Z;
+      M 184 278 L 216 278 L 320 480 L 80 480 Z;
+      M 242 314 L 256 282 L 590 395 L 570 432 Z
+    "/>
+</path>
+<path fill="#4A9FD8" opacity="0.3">
+  <animate attributeName="d" dur="5s" repeatCount="indefinite"
+    calcMode="spline" keySplines="0.4 0 0.6 1;0 0 1 1;0.4 0 0.6 1"
+    keyTimes="0;0.4;0.55;1"
+    values="
+      M 244 309 L 256 284 L 460 358 L 448 378 Z;
+      M 188 278 L 212 278 L 260 410 L 140 410 Z;
+      M 188 278 L 212 278 L 260 410 L 140 410 Z;
+      M 244 309 L 256 284 L 460 358 L 448 378 Z
+    "/>
+</path>
+
+<!-- Teleskop-Ring 1 -->
+<line stroke="#062040" stroke-width="8" stroke-linecap="round">
+  <animate attributeName="x1" dur="5s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1;0 0 1 1;0.4 0 0.6 1" keyTimes="0;0.4;0.55;1" values="320;117;117;320"/>
+  <animate attributeName="y1" dur="5s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1;0 0 1 1;0.4 0 0.6 1" keyTimes="0;0.4;0.55;1" values="382;351;351;382"/>
+  <animate attributeName="x2" dur="5s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1;0 0 1 1;0.4 0 0.6 1" keyTimes="0;0.4;0.55;1" values="356;283;283;356"/>
+  <animate attributeName="y2" dur="5s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1;0 0 1 1;0.4 0 0.6 1" keyTimes="0;0.4;0.55;1" values="304;351;351;304"/>
+</line>
+<line stroke="#4A9FD8" stroke-width="3" stroke-linecap="round" opacity="0.5">
+  <animate attributeName="x1" dur="5s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1;0 0 1 1;0.4 0 0.6 1" keyTimes="0;0.4;0.55;1" values="320;117;117;320"/>
+  <animate attributeName="y1" dur="5s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1;0 0 1 1;0.4 0 0.6 1" keyTimes="0;0.4;0.55;1" values="382;351;351;382"/>
+  <animate attributeName="x2" dur="5s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1;0 0 1 1;0.4 0 0.6 1" keyTimes="0;0.4;0.55;1" values="356;283;283;356"/>
+  <animate attributeName="y2" dur="5s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1;0 0 1 1;0.4 0 0.6 1" keyTimes="0;0.4;0.55;1" values="304;351;351;304"/>
+</line>
+
+<!-- Teleskop-Ring 2 -->
+<line stroke="#062040" stroke-width="10" stroke-linecap="round">
+  <animate attributeName="x1" dur="5s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1;0 0 1 1;0.4 0 0.6 1" keyTimes="0;0.4;0.55;1" values="449;59;59;449"/>
+  <animate attributeName="y1" dur="5s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1;0 0 1 1;0.4 0 0.6 1" keyTimes="0;0.4;0.55;1" values="462;425;425;462"/>
+  <animate attributeName="x2" dur="5s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1;0 0 1 1;0.4 0 0.6 1" keyTimes="0;0.4;0.55;1" values="501;341;341;501"/>
+  <animate attributeName="y2" dur="5s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1;0 0 1 1;0.4 0 0.6 1" keyTimes="0;0.4;0.55;1" values="354;425;425;354"/>
+</line>
+<line stroke="#4A9FD8" stroke-width="4" stroke-linecap="round" opacity="0.5">
+  <animate attributeName="x1" dur="5s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1;0 0 1 1;0.4 0 0.6 1" keyTimes="0;0.4;0.55;1" values="449;59;59;449"/>
+  <animate attributeName="y1" dur="5s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1;0 0 1 1;0.4 0 0.6 1" keyTimes="0;0.4;0.55;1" values="462;425;425;462"/>
+  <animate attributeName="x2" dur="5s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1;0 0 1 1;0.4 0 0.6 1" keyTimes="0;0.4;0.55;1" values="501;341;341;501"/>
+  <animate attributeName="y2" dur="5s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1;0 0 1 1;0.4 0 0.6 1" keyTimes="0;0.4;0.55;1" values="354;425;425;354"/>
+</line>
+
+<!-- Objektiv -->
+<circle fill="#062040">
+  <animate attributeName="cx" dur="5s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1;0 0 1 1;0.4 0 0.6 1" keyTimes="0;0.4;0.55;1" values="617;200;200;617"/>
+  <animate attributeName="cy" dur="5s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1;0 0 1 1;0.4 0 0.6 1" keyTimes="0;0.4;0.55;1" values="475;500;500;475"/>
+  <animate attributeName="r"  dur="5s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1;0 0 1 1;0.4 0 0.6 1" keyTimes="0;0.4;0.55;1" values="62;200;200;62"/>
+</circle>
+<circle fill="#C2D5E5">
+  <animate attributeName="cx" dur="5s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1;0 0 1 1;0.4 0 0.6 1" keyTimes="0;0.4;0.55;1" values="617;200;200;617"/>
+  <animate attributeName="cy" dur="5s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1;0 0 1 1;0.4 0 0.6 1" keyTimes="0;0.4;0.55;1" values="475;500;500;475"/>
+  <animate attributeName="r"  dur="5s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1;0 0 1 1;0.4 0 0.6 1" keyTimes="0;0.4;0.55;1" values="50;162;162;50"/>
+</circle>
+<circle fill="#5A7A95">
+  <animate attributeName="cx" dur="5s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1;0 0 1 1;0.4 0 0.6 1" keyTimes="0;0.4;0.55;1" values="630;200;200;630"/>
+  <animate attributeName="cy" dur="5s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1;0 0 1 1;0.4 0 0.6 1" keyTimes="0;0.4;0.55;1" values="485;500;500;485"/>
+  <animate attributeName="r"  dur="5s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1;0 0 1 1;0.4 0 0.6 1" keyTimes="0;0.4;0.55;1" values="24;96;96;24"/>
+  <animate attributeName="opacity" dur="5s" repeatCount="indefinite"
+    keyTimes="0;0.42;0.49;0.53;0.58;1"
+    values="0.8;0.8;0.05;0.8;0.8;0.8"/>
+</circle>
+<circle fill="#C8DCE8" opacity="0.65">
+  <animate attributeName="cx" dur="5s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1;0 0 1 1;0.4 0 0.6 1" keyTimes="0;0.4;0.55;1" values="621;200;200;621"/>
+  <animate attributeName="cy" dur="5s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1;0 0 1 1;0.4 0 0.6 1" keyTimes="0;0.4;0.55;1" values="477;485;485;477"/>
+  <animate attributeName="r"  dur="5s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1;0 0 1 1;0.4 0 0.6 1" keyTimes="0;0.4;0.55;1" values="6;24;24;6"/>
+</circle>
+
+</svg>

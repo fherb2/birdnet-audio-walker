@@ -1,0 +1,77 @@
+<svg width="512" height="512" viewBox="0 0 680 680" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <radialGradient id="scopeGrad" cx="30%" cy="25%" r="70%">
+    <stop offset="0%"   stop-color="#1E6DB5"/>
+    <stop offset="40%"  stop-color="#0E4F8A"/>
+    <stop offset="100%" stop-color="#062040"/>
+  </radialGradient>
+</defs>
+
+<rect width="680" height="680" fill="#F5C800" rx="100"/>
+
+<circle cx="265" cy="360" r="175" fill="none" stroke="#1a1a1a" stroke-width="18"/>
+
+<path d="M 100 418 A 175 175 0 0 0 430 418 Z" fill="#1a1a1a"/>
+<path d="M 100 418 A 175 175 0 0 0 265 535 Z" fill="#555555"/>
+<path d="M 145 418 A 120 120 0 0 0 265 490 Z" fill="#1a1a1a"/>
+
+<path d="M 323 195 A 175 175 0 0 1 430 418 L 323 418 Z" fill="#1a1a1a"/>
+<path d="M 323 195 A 175 175 0 0 1 415 305 L 323 305 Z" fill="#555555"/>
+<path d="M 323 218 A 120 120 0 0 1 390 302 L 323 302 Z" fill="#1a1a1a"/>
+
+<circle cx="265" cy="360" r="175" fill="none" stroke="#1a1a1a" stroke-width="18"/>
+
+<rect x="252" y="100" width="26" height="87" rx="8" fill="#1a1a1a"/>
+<g transform="rotate(-10, 263, 103)">
+  <rect x="50"  y="92" width="210" height="22" rx="11" fill="#1a1a1a"/>
+  <rect x="258" y="92" width="210" height="22" rx="11" fill="#1a1a1a"/>
+</g>
+<circle cx="263" cy="103" r="20" fill="#F5C800"/>
+<circle cx="263" cy="103" r="9"  fill="#1a1a1a"/>
+
+<rect x="415" y="300" width="168" height="30" rx="14" fill="#1a1a1a"/>
+<rect x="558" y="214" width="28" height="116" rx="10" fill="#1a1a1a"/>
+<rect x="536" y="206" width="98" height="22" rx="8" fill="#1a1a1a"/>
+<!-- Heckrotor: 2 Segmente, um Nabe (627,290) rotiert -->
+<!-- Heckrotor: Außenr=52, Innenr=9, rotate -30°
+     Segment 1 (oben): -90° bis -30°
+       Außen -90°=(627,238)  -30°=(627+45.0,290-26)=(672,264)
+       Innen -90°=(627,281)  -30°=(635,286)
+     Segment 2 (unten): 90° bis 150°
+       Außen 90°=(627,342)  150°=(627-45.0,290+26)=(582,316)
+       Innen 90°=(627,299)  150°=(619,295)
+-->
+<g transform="rotate(-30, 617, 290)">
+  <path d="M 617 238 A 52 52 0 0 1 662 264 L 625 286 A 9 9 0 0 0 617 281 Z" fill="#555555"/>
+  <path d="M 617 342 A 52 52 0 0 1 572 316 L 609 295 A 9 9 0 0 0 617 299 Z" fill="#555555"/>
+</g>
+<circle cx="617" cy="290" r="20" fill="#F5C800"/>
+<circle cx="617" cy="290" r="9"  fill="#1a1a1a"/>
+
+<rect x="125" y="548" width="245" height="18" rx="9" fill="#1a1a1a"/>
+<rect x="143" y="516" width="16" height="46" rx="5" fill="#1a1a1a"/>
+<rect x="336" y="516" width="16" height="46" rx="5" fill="#1a1a1a"/>
+
+<path d="M 236 323  L 260 277  L 626 406  L 554 544  Z" fill="url(#scopeGrad)"/>
+<path d="M 242 314  L 256 282  L 590 395  L 570 432  Z" fill="#1E6DB5" opacity="0.45"/>
+<path d="M 244 309  L 256 284  L 460 358  L 448 378  Z" fill="#4A9FD8" opacity="0.3"/>
+
+<line x1="341" y1="397" x2="381" y2="320" stroke="#062040" stroke-width="8" stroke-linecap="round"/>
+<line x1="341" y1="397" x2="381" y2="320" stroke="#4A9FD8" stroke-width="3" stroke-linecap="round" opacity="0.5"/>
+<line x1="446" y1="470" x2="502" y2="362" stroke="#062040" stroke-width="10" stroke-linecap="round"/>
+<line x1="446" y1="470" x2="502" y2="362" stroke="#4A9FD8" stroke-width="4" stroke-linecap="round" opacity="0.5"/>
+
+<circle cx="590" cy="475" r="62" fill="#062040"/>
+<circle cx="590" cy="475" r="50" fill="#C2D5E5"/>
+<circle cx="603" cy="485" r="24" fill="#5A7A95" opacity="0.8"/>
+<circle cx="594" cy="477" r="6"  fill="#C8DCE8" opacity="0.65"/>
+
+<circle cx="200" cy="278" r="48" fill="white"/>
+<circle cx="218" cy="287" r="26" fill="#1a1a1a"/>
+<circle cx="210" cy="279" r="9"  fill="white"/>
+
+<line x1="72"  y1="318" x2="16"  y2="318" stroke="#1a1a1a" stroke-width="8" stroke-linecap="round" opacity="0.55"/>
+<line x1="78"  y1="358" x2="16"  y2="358" stroke="#1a1a1a" stroke-width="5" stroke-linecap="round" opacity="0.4"/>
+<line x1="76"  y1="396" x2="20"  y2="396" stroke="#1a1a1a" stroke-width="3" stroke-linecap="round" opacity="0.28"/>
+
+</svg>
