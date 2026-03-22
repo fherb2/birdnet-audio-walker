@@ -119,12 +119,17 @@ class DbFolderTree:
         self,
         root_path: Path,
         on_change: Optional[Callable[[Set[Path]], None]] = None,
+        preselected: Optional[Set[Path]] = None,
     ) -> None:
         self._root_path = root_path
         self._on_change = on_change
 
-        # Checked state: path → bool
-        self._checked: dict[Path, bool] = {}
+        # Checked state: path → bool  (pre-populate from preselected)
+        self._checked: dict[Path, bool] = {
+            p: True for p in (preselected or set())
+        }
+        # Suppress on_change callbacks during initial render
+        self._initialising: bool = True
 
         # Expand state: path → bool  (True = expanded)
         self._expanded: dict[Path, bool] = {}
@@ -187,6 +192,8 @@ class DbFolderTree:
             for i, child in enumerate(root_node.children):
                 is_last = (i == len(root_node.children) - 1)
                 self._render_node(child, depth=0, is_last=is_last, ancestor_is_last=[])
+
+            self._initialising = False
                 
     # ------------------------------------------------------------------
     # Rendering
@@ -322,16 +329,18 @@ class DbFolderTree:
 
     def _on_checkbox_change(self, node: DbFolderTreeNode, checked: bool) -> None:
         """Handle check/uncheck of a single DB-folder node."""
+        if self._initialising:
+            return
         self._checked[node.path] = checked
-        # Update parent group checkboxes up the tree
         self._refresh_group_checkboxes(self._tree_root)
         self._notify_change()
 
     def _on_group_checkbox_change(self, node: DbFolderTreeNode, checked: bool) -> None:
         """Handle check/uncheck of a group header – cascades to all DB children."""
+        if self._initialising:
+            return
         self._set_subtree_checked(node, checked)
         self._refresh_group_checkboxes(self._tree_root)
-        # Sync individual checkbox widgets
         for path, is_checked in self._checked.items():
             cb = self._checkboxes.get(path)
             if cb is not None:
@@ -377,5 +386,9 @@ class DbFolderTree:
 
     def _notify_change(self) -> None:
         """Call the on_change callback with the current selection."""
+        if self._initialising:
+            return
         if self._on_change is not None:
             self._on_change(self.selected_folders)
+            
+            

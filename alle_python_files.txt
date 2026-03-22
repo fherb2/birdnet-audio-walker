@@ -1,6 +1,6 @@
-=== ./source/birdnet_copter/app_state.py ===
+=== /workspace/source/birdnet_copter/app_state.py ===
 """
-Application state for BirdNET Play NiceGUI server.
+Application state 2026/03/20 for BirdNET Play NiceGUI server.
 Single server-side state object shared across all pages and client connections.
 """
 
@@ -30,7 +30,10 @@ class AppState:
     read_only: bool = False
     available_dbs: List[Path] = field(default_factory=list)
     active_db: Optional[Path] = None
-    language_code: str = 'de'
+    # Bird name language (fully implemented)
+    bird_language_code: str = 'de'
+    # GUI language (prepared, not yet active)
+    gui_language_code: str = 'de'
     
     # ------------------------------------------------------------------
     # Hardware & inference configuration  (filled by hardware.py / Hangar)
@@ -174,7 +177,22 @@ class AppState:
         self.audio_generation_progress = 0.0
         self.audio_generation_running = False
 
-        === ./source/birdnet_copter/audio_extract.py ===
+    def is_busy(self) -> bool:
+        """Return True if any Type-A background task is currently running."""
+        if self.shared_state is None:
+            return False
+        tasks: dict = self.shared_state.get('tasks', {})
+        return any(t.get('running', False) for t in tasks.values())
+
+    def busy_label(self) -> str:
+        """Return the label of the first active task, or '' if none is running."""
+        if self.shared_state is None:
+            return ''
+        tasks: dict = self.shared_state.get('tasks', {})
+        for t in tasks.values():
+            if t.get('running', False):
+                return t.get('label', '')
+        return ''=== /workspace/source/birdnet_copter/audio_extract.py ===
 """
 Audio snippet extraction from WAV files.
 """
@@ -325,7 +343,7 @@ def extract_snippet(
         )
         
         return audio_data, sample_rate
-=== ./source/birdnet_copter/audiomoth_import.py ===
+=== /workspace/source/birdnet_copter/audiomoth_import.py ===
 """
 AudioMoth WAV file metadata extraction.
 """
@@ -516,151 +534,192 @@ def extract_metadata(wav_path: str) -> dict:
     logger.debug(f"Metadata extracted: {filename} @ {metadata.get('timestamp_local')}")
     
     return metadata
-=== ./source/birdnet_copter/backup/layout.py ===
+=== /workspace/source/birdnet_copter/bird_language.py ===
 """
-Shared page layout for BirdNET Copter.
+Bird species name translation for BirdNET Play.
 
-Call create_layout(app_state) at the top of every @ui.page handler.
-Returns a reference to the left drawer so pages can add nav items if needed
-(not normally necessary).
+Loads label files from:
+  1. BIRD_LANGUAGES_PATH  (local overrides, priority)
+  2. BIRDNET_LABELS_PATH  (bundled with BirdNET model)
 
-Layout structure:
-    ui.header  (full width, 3 columns)
-        col-left  : hamburger button → opens left_drawer overlay
-        col-center: root path (row 1) / active db path (row 2)
-        col-right : access mode (row 1) / spinner when busy (row 2)
-    ui.left_drawer (overlay, hidden by default)
-        navigation menu entries
+Label file format:  <scientific_name>_<local_name>  (one entry per line)
+File naming:        <language_code>.txt  (e.g. de.txt, en_uk.txt)
+
+Loaded dicts are cached at module level – files are read only once per
+language per process lifetime.
 """
 
-from nicegui import ui, app as nicegui_app, context
+from pathlib import Path
+from loguru import logger
 
-from ..app_state import AppState
+from .config import BIRDNET_LABELS_PATH, BIRD_LANGUAGES_PATH
 
 
 # ---------------------------------------------------------------------------
-# Internal helpers
+# Module-level cache
 # ---------------------------------------------------------------------------
 
-def _relative_db_label(app_state: AppState) -> str:
-    if app_state.active_db_is_global:
-        if app_state.global_index_path is not None:
-            return f"{app_state.global_index_path} (global)"
-        return "– (global)"
-
-    if app_state.active_db is None:
-        return '–'
-
-    db_folder = app_state.active_db.parent
-    try:
-        rel = db_folder.relative_to(app_state.root_path)
-        if str(rel) == '.':
-            return f"../{app_state.root_path.name}"
-        return f"./{rel}"
-    except ValueError:
-        return str(db_folder)
+_label_cache: dict[str, dict[str, str]] = {}
+# Key: language code, Value: {scientific_name: local_name}
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
-def create_layout(app_state: AppState) -> ui.left_drawer:
+def get_available_languages() -> list[str]:
     """
-    Render the shared header and navigation drawer.
+    Return sorted list of all available language codes.
 
-    Must be called inside a @ui.page handler, before any page content.
-
-    Args:
-        app_state: The global AppState instance.
+    Union of *.txt files found in BIRD_LANGUAGES_PATH and BIRDNET_LABELS_PATH.
+    Files must follow the naming convention  <language_code>.txt.
 
     Returns:
-        The ui.left_drawer instance (overlay nav menu).
-        Pages normally don't need this reference.
+        Sorted list of language code strings (e.g. ['cs', 'de', 'en_uk', ...]).
+        Empty list if neither directory exists.
     """
-    
-    # ------------------------------------------------------------------
-    # Page title (for Browser-Tabs)
-    # ------------------------------------------------------------------
-    ui.page_title('birdnet-copter')
+    codes: set[str] = set()
 
-    # ------------------------------------------------------------------
-    # Navigation drawer (hamburger overlay)
-    # ------------------------------------------------------------------
-    with ui.left_drawer(value=False).classes('bg-grey-1 p-4') as nav_drawer:
-        ui.label('Navigation').classes('text-h6 q-mb-md')
-        ui.separator()
+    for label_dir in (BIRD_LANGUAGES_PATH, BIRDNET_LABELS_PATH):
+        if label_dir is not None and label_dir.exists():
+            for f in label_dir.glob("*.txt"):
+                codes.add(f.stem)
+        elif label_dir is not None:
+            logger.debug(f"Label directory not found: {label_dir}")
 
-        nav_items = [
-            ('Hangar',            '/'),
-            ('Scouting Flight',   '/scouting'),
-            ('Exploration Area',  '/exploration'),
-            ('Audio Player',   '/audio-player'),
-            ('Date-Time-Map',        '/heatmap'),
-        ]
+    languages = sorted(codes)
+    logger.debug(f"Available bird-name languages: {languages}")
+    return languages
 
-        for label, path in nav_items:
-            ui.item(label, on_click=lambda p=path: ui.navigate.to(p)) \
-                .classes('cursor-pointer rounded hover:bg-grey-3 q-py-xs')
 
-    # ------------------------------------------------------------------
-    # Header
-    # ------------------------------------------------------------------
-    with ui.header().classes('items-center justify-between bg-primary text-white px-4 py-1'):
+def load_labels(language: str) -> dict[str, str]:
+    """
+    Load labels for a language. Result is cached after the first call.
 
-        # --- left column: hamburger ---
-        with ui.row().classes('items-center gap-2'):
-            ui.button(icon='menu', on_click=nav_drawer.toggle) \
-                .props('flat dense round color=white')
-            ui.label('birdnet-copter').classes('text-h6 font-bold')
+    Local BIRD_LANGUAGES_PATH takes priority over BIRDNET_LABELS_PATH.
+    Falls back to 'de' with a warning if the requested language is not found
+    in either location.
 
-        # --- center column: paths ---
-        with ui.column().classes('items-center gap-0'):
-            root_label = ui.label(str(app_state.root_path)) \
-                .classes('text-caption opacity-80')
-            db_label = ui.label(_relative_db_label(app_state)) \
-                .classes('text-body2 font-bold')
+    Args:
+        language: Language code (e.g. 'de', 'en_uk', 'cs').
 
-        # --- right column: access mode + spinner ---
-        with ui.column().classes('items-end gap-0'):
-            access_text = '🔒 read-only' if app_state.read_only else '✏️ read-write'
-            ui.label(access_text).classes('text-caption')
+    Returns:
+        Dict mapping scientific_name → local_name.
+        Empty dict if even the fallback language cannot be loaded.
+    """
+    if language in _label_cache:
+        return _label_cache[language]
 
-            # Spinner row – visible only while generation is running
-            with ui.row().classes('items-center gap-1') as spinner_row:
-                spinner = ui.spinner(size='sm').classes('text-white')
-                ui.label('processing…').classes('text-caption')
+    labels = _load_from_dirs(language)
 
-            # Timer updates spinner visibility every 500 ms
-            def _update_spinner():
-                try:
-                    running = app_state.audio_generation_running
-                    spinner_row.set_visibility(running)
-                except Exception:
-                    pass
+    if not labels and language != 'de':
+        logger.warning(
+            f"Bird-name language '{language}' not found – falling back to 'de'"
+        )
+        labels = _load_from_dirs('de')
+        # Cache under both keys so the caller's language also hits the cache
+        _label_cache['de'] = labels
+        _label_cache[language] = labels
+        return labels
 
-            t_spinner = ui.timer(0.5, _update_spinner)
+    _label_cache[language] = labels
+    return labels
 
-    # ------------------------------------------------------------------
-    # Timer to keep center path labels in sync with state changes
-    # (e.g. after a DB switch on the overview page)
-    # ------------------------------------------------------------------
-    def _update_paths():
-        try:
-            root_label.set_text(str(app_state.root_path))
-            db_label.set_text(_relative_db_label(app_state))
-        except Exception:
-            pass
 
-    t_paths = ui.timer(1.0, _update_paths)
+def translate(scientific_name: str, language: str) -> str:
+    """
+    Translate a scientific species name to the target language.
 
-    async def _stop_timers():
-        t_spinner.cancel()
-        t_paths.cancel()
+    Args:
+        scientific_name: Scientific name (e.g. 'Parus major').
+        language:        Language code (e.g. 'de').
 
-    context.client.on_disconnect(_stop_timers)
+    Returns:
+        Local name if found, otherwise scientific_name as fallback.
+    """
+    labels = load_labels(language)
+    return labels.get(scientific_name, scientific_name)
 
-    return nav_drawer=== ./source/birdnet_copter/birdnet_analyzer.py ===
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+def _load_from_dirs(language: str) -> dict[str, str]:
+    """
+    Try to load a label file for *language* from the configured directories.
+
+    BIRD_LANGUAGES_PATH is checked first (local overrides).
+    Falls through to BIRDNET_LABELS_PATH if not found there.
+
+    Returns:
+        Parsed label dict, or empty dict if not found in either location.
+    """
+    search_dirs = []
+    if BIRD_LANGUAGES_PATH is not None:
+        search_dirs.append(BIRD_LANGUAGES_PATH)
+    if BIRDNET_LABELS_PATH is not None:
+        search_dirs.append(BIRDNET_LABELS_PATH)
+
+    for label_dir in search_dirs:
+        label_file = label_dir / f"{language}.txt"
+        if label_file.exists():
+            result = _parse_label_file(label_file)
+            if result:
+                logger.info(
+                    f"Loaded {len(result)} labels for '{language}' "
+                    f"from {label_dir.name}/"
+                )
+                return result
+
+    logger.error(f"No label file found for language '{language}' in any configured directory")
+    return {}
+
+
+def _parse_label_file(label_file: Path) -> dict[str, str]:
+    """
+    Parse a BirdNET label file.
+
+    Expected line format:  <scientific_name>_<local_name>
+    Lines that do not contain exactly one underscore separator are skipped
+    with a warning.
+
+    Args:
+        label_file: Path to the .txt label file.
+
+    Returns:
+        Dict {scientific_name: local_name}.  Empty dict on read error.
+    """
+    labels: dict[str, str] = {}
+
+    try:
+        with open(label_file, 'r', encoding='utf-8') as f:
+            for line_num, line in enumerate(f, 1):
+                line = line.strip()
+                if not line:
+                    continue
+
+                # Split on underscore – exactly one separator expected
+                parts = line.split('_', 1)
+                if len(parts) != 2:
+                    logger.warning(
+                        f"{label_file.name} line {line_num}: "
+                        f"unexpected format, skipping: {line!r}"
+                    )
+                    continue
+
+                scientific_name = parts[0].strip()
+                local_name      = parts[1].strip()
+
+                if scientific_name:
+                    labels[scientific_name] = local_name
+
+    except Exception as e:
+        logger.error(f"Error reading label file {label_file}: {e}")
+        return {}
+
+    return labels
+=== /workspace/source/birdnet_copter/birdnet_analyzer.py ===
 """
 BirdNET analyzer wrapper.
 """
@@ -987,84 +1046,7 @@ def calculate_segment_times(
 
 
 
-=== ./source/birdnet_copter/birdnet_labels.py ===
-"""
-BirdNET species labels management.
-Loads species names in different languages from BirdNET label files.
-"""
-
-from pathlib import Path
-from loguru import logger
-from .config import BIRDNET_LABELS_PATH
-
-
-def get_available_languages() -> list[str]:
-    """
-    Scan BirdNET labels directory and extract available language codes.
-    
-    Returns:
-        List of language codes (e.g., ['de', 'en_uk', 'en_us', ...])
-    """
-    if not BIRDNET_LABELS_PATH.exists():
-        logger.warning(f"BirdNET labels path does not exist: {BIRDNET_LABELS_PATH}")
-        return []
-    
-    languages = []
-    
-    for label_file in BIRDNET_LABELS_PATH.glob("*.txt"):
-        # Extract language code from filename (e.g., "de.txt" -> "de", "en_uk.txt" -> "en_uk")
-        lang_code = label_file.stem
-        languages.append(lang_code)
-    
-    languages.sort()
-    logger.debug(f"Found {len(languages)} language files: {languages}")
-    return languages
-
-
-def load_birdnet_labels(language: str) -> dict[str, str]:
-    """
-    Load BirdNET labels file for a specific language.
-    
-    Args:
-        language: Language code (e.g., 'de', 'en_uk')
-        
-    Returns:
-        Dictionary mapping scientific name to local name
-        Empty dict if file not found or error occurs
-    """
-    label_file = BIRDNET_LABELS_PATH / f"{language}.txt"
-    
-    if not label_file.exists():
-        logger.error(f"BirdNET labels file not found: {label_file}")
-        return {}
-    
-    labels = {}
-    
-    try:
-        with open(label_file, 'r', encoding='utf-8') as f:
-            for line_num, line in enumerate(f, 1):
-                line = line.strip()
-                if not line:
-                    continue
-                
-                # Split by underscore (should be exactly one underscore)
-                parts = line.split('_')
-                
-                if len(parts) != 2:
-                    logger.warning(f"Invalid format in {label_file.name} line {line_num}: {line}")
-                    continue
-                
-                scientific_name = parts[0].strip()
-                local_name = parts[1].strip()
-                
-                labels[scientific_name] = local_name
-        
-        logger.info(f"Loaded {len(labels)} labels for language '{language}'")
-        return labels
-        
-    except Exception as e:
-        logger.error(f"Error loading BirdNET labels from {label_file}: {e}")
-        return {}=== ./source/birdnet_copter/cli_playback.py ===
+=== /workspace/source/birdnet_copter/cli_playback.py ===
 """
 CLI playback with keyboard control.
 Extracted from the former cli.py to keep main.py concise.
@@ -1237,7 +1219,7 @@ def cli_playback(
         logger.error(f"Playback error: {e}")
         sd.stop()
     finally:
-        controller.stop()=== ./source/birdnet_copter/config.py ===
+        controller.stop()=== /workspace/source/birdnet_copter/config.py ===
 """
 Configuration constants for BirdNET Batch Analyzer.
 """
@@ -1273,10 +1255,8 @@ HDF5_CHUNK_SIZE = 1000                       # Chunk size for HDF5 (rows per chu
 # ============================================================================
 
 
-# Species Translation
-SPECIES_CACHE_DIR = "/tmp"
-SPECIES_CACHE_MAX_AGE_DAYS = 7
-SPECIES_TABLE_URL = "https://www.karlincam.cz/de_de/und-sonst-noch/artennamen-uebersetzen/vogelnamen-wissenschaftlich-sortiert"
+# Bird Name Languages (local overrides, take priority over BirdNET bundled labels)
+BIRD_LANGUAGES_PATH = Path.home() / ".local/share/birdnet-play/bird_languages"
 
 # Index Management
 INDEX_NAMES = [
@@ -1288,12 +1268,11 @@ INDEX_NAMES = [
 # BirdNET Model
 BIRDNET_MODEL_PATH = Path.home() / ".local/share/birdnet/acoustic-models/v2.4/"
 BIRDNET_LABELS_PATH = Path.home() / ".local/share/birdnet/acoustic-models/v2.4/pb/labels"
-DEFAULT_LANGUAGE = "de"
 
 # BirdNET Model Download
 BIRDNET_DOWNLOAD_MAX_RETRIES = 2
 BIRDNET_DOWNLOAD_BASE_WAIT = 60  # Base wait time in seconds for retry
-BIRDNET_DOWNLOAD_PROMPT_TIMEOUT = 20  # Seconds to wait for user input=== ./source/birdnet_copter/database.py ===
+BIRDNET_DOWNLOAD_PROMPT_TIMEOUT = 20  # Seconds to wait for user input=== /workspace/source/birdnet_copter/database.py ===
 """
 SQLite database management for BirdNET Batch Analyzer.
 """
@@ -1357,7 +1336,6 @@ def init_database(db_path: str):
         )
     """)
     
-    # Detections table - WITH embedding_idx (points to HDF5 row)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS detections (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1455,7 +1433,6 @@ def batch_insert_detections(
         filename:   Original WAV filename
         metadata:   File metadata dict
         detections: List of detection dicts from BirdNET.
-                    MAY contain 'embedding_idx' key with integer index.
     """
     if not detections:
         return
@@ -1475,14 +1452,12 @@ def batch_insert_detections(
             seg_start_local = metadata['timestamp_local'] + timedelta(seconds=start_s)
             seg_end_local   = metadata['timestamp_local'] + timedelta(seconds=end_s)
 
-            embedding_idx = detection.get('embedding_idx', None)
-
             cursor.execute("""
                 INSERT INTO detections
                 (filename, segment_start_utc, segment_start_local,
                  segment_end_utc, segment_end_local, timezone,
-                 scientific_name, confidence, embedding_idx)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 scientific_name, confidence)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 filename,
                 seg_start_utc.isoformat(),
@@ -1492,7 +1467,6 @@ def batch_insert_detections(
                 metadata['timezone'],
                 detection['scientific_name'],
                 detection['confidence'],
-                embedding_idx,
             ))
 
         conn.commit()
@@ -1757,7 +1731,7 @@ def vacuum_database(db_path: str):
     except Exception as e:
         logger.error(f"Error vacuuming database: {e}")
     finally:
-        conn.close()=== ./source/birdnet_copter/db_queries.py ===
+        conn.close()=== /workspace/source/birdnet_copter/db_queries.py ===
 """
 Database query functions for BirdNET tools.
 Read-only access to analysis databases.
@@ -1776,10 +1750,10 @@ CONFIDENCE_THRESHOLD_HIGH = 0.7  # Detections above this are "high confidence"
 def get_db_connection(db_path: Path) -> sqlite3.Connection:
     """
     Open database connection with WAL mode.
-    
+
     Args:
         db_path: Path to SQLite database
-        
+
     Returns:
         SQLite connection with Row factory for dict-like access
     """
@@ -1792,16 +1766,15 @@ def get_db_connection(db_path: Path) -> sqlite3.Connection:
 def get_analysis_config(db_path: Path, key: str) -> Optional[str]:
     """
     Read value from analysis_config table.
-    
+
     Args:
         db_path: Path to SQLite database
         key: Config key to read
-        
+
     Returns:
         Config value or None if not found
     """
     conn = get_db_connection(db_path)
-    
     try:
         cursor = conn.execute(
             "SELECT value FROM analysis_config WHERE key = ?",
@@ -1810,7 +1783,6 @@ def get_analysis_config(db_path: Path, key: str) -> Optional[str]:
         row = cursor.fetchone()
         return row['value'] if row else None
     except sqlite3.OperationalError:
-        # Table doesn't exist (old database)
         logger.warning(f"analysis_config table not found in {db_path}")
         return None
     finally:
@@ -1820,29 +1792,24 @@ def get_analysis_config(db_path: Path, key: str) -> Optional[str]:
 def set_analysis_config(db_path: Path, key: str, value: str) -> bool:
     """
     Schreibt/aktualisiert Wert in analysis_config Tabelle.
-    
+
     Args:
         db_path: Pfad zur Datenbank
         key: Config-Key
         value: Wert zum Speichern
-        
+
     Returns:
         True wenn erfolgreich, False bei Fehler
     """
     try:
         conn = get_db_connection(db_path)
-        
-        # INSERT OR REPLACE (upsert)
         conn.execute(
             "INSERT OR REPLACE INTO analysis_config (key, value) VALUES (?, ?)",
             (key, value)
         )
-        
         conn.commit()
         conn.close()
-        
         return True
-        
     except Exception as e:
         logger.error(f"Failed to set analysis_config '{key}': {e}")
         return False
@@ -1851,15 +1818,14 @@ def set_analysis_config(db_path: Path, key: str, value: str) -> bool:
 def get_all_metadata(db_path: Path) -> List[Dict]:
     """
     Lädt alle File-Metadaten aus der metadata Tabelle.
-    
+
     Returns:
         Liste von Dicts mit allen Metadata-Feldern
     """
     try:
         conn = get_db_connection(db_path)
-        
         query = """
-            SELECT 
+            SELECT
                 filename,
                 timestamp_utc,
                 timestamp_local,
@@ -1878,13 +1844,10 @@ def get_all_metadata(db_path: Path) -> List[Dict]:
             FROM metadata
             ORDER BY timestamp_local ASC
         """
-        
         cursor = conn.execute(query)
         results = [dict(row) for row in cursor.fetchall()]
         conn.close()
-        
         return results
-        
     except Exception as e:
         logger.error(f"Failed to load metadata: {e}")
         return []
@@ -1893,10 +1856,10 @@ def get_all_metadata(db_path: Path) -> List[Dict]:
 def species_list_exists(db_path: Path) -> bool:
     """
     Check if species_list table exists in database.
-    
+
     Args:
         db_path: Path to SQLite database
-        
+
     Returns:
         True if table exists, False otherwise
     """
@@ -1917,12 +1880,12 @@ def create_species_list_table(db_path: Path) -> bool:
     """
     Create/recreate species_list table and populate with unique species from detections.
     Includes high/low confidence counts and score for intelligent sorting.
-    
+
     Drops existing table if present, then creates new one with all unique species.
-    
+
     Args:
         db_path: Path to SQLite database
-        
+
     Returns:
         True if successful, False on error
     """
@@ -1946,7 +1909,7 @@ def create_species_list_table(db_path: Path) -> bool:
                 scientific_name,
                 SUM(CASE WHEN confidence >= {CONFIDENCE_THRESHOLD_HIGH} THEN 1 ELSE 0 END),
                 SUM(CASE WHEN confidence < {CONFIDENCE_THRESHOLD_HIGH} THEN 1 ELSE 0 END),
-                SUM(confidence * confidence * confidence * confidence)
+                SUM(confidence * confidence * confidence * confidence) AS score
             FROM detections
             GROUP BY scientific_name
             ORDER BY score DESC
@@ -1964,21 +1927,20 @@ def create_species_list_table(db_path: Path) -> bool:
     except Exception as e:
         logger.error(f"Failed to create species_list table: {e}")
         return False
-    
+
 
 def get_species_count(db_path: Path) -> int:
     """
     Get number of species in species_list table.
-    
+
     Args:
         db_path: Path to SQLite database
-        
+
     Returns:
         Number of species, or 0 if table doesn't exist
     """
     if not species_list_exists(db_path):
         return 0
-    
     try:
         conn = get_db_connection(db_path)
         cursor = conn.execute("SELECT COUNT(*) FROM species_list")
@@ -1990,19 +1952,18 @@ def get_species_count(db_path: Path) -> int:
         return 0
 
 
-def get_available_species(db_path: Path) -> List[Tuple[str, str]]:
+def get_available_species(db_path: Path) -> List[str]:
     """
     Get list of all available species from species_list table.
     Falls back to detections table if species_list doesn't exist.
-    
+
     Returns:
-        List of tuples: [(scientific_name, local_name), ...]
-        Sorted alphabetically by scientific name
+        List of scientific_name strings, sorted alphabetically.
+        Translation to local names is done by the caller via labels dict.
     """
     try:
         conn = get_db_connection(db_path)
-        
-        # Try species_list first
+
         if species_list_exists(db_path):
             query = """
                 SELECT scientific_name
@@ -2019,37 +1980,42 @@ def get_available_species(db_path: Path) -> List[Tuple[str, str]]:
         cursor = conn.execute(query)
         results = [row[0] for row in cursor.fetchall()]
         conn.close()
-        
         return results
-        
+
     except Exception as e:
         logger.error(f"Failed to get available species: {e}")
         return []
 
 
-def get_species_list_with_counts(db_path: Path) -> List[Dict]:
+def get_species_list_with_counts(
+    db_path: Path,
+    labels: Optional[dict] = None,
+) -> List[Dict]:
     """
     Get complete species list with detection counts and score.
-    
+
     Args:
         db_path: Path to SQLite database
-        
+        labels:  Optional dict {scientific_name: local_name} from bird_language.
+                 When provided, each result dict gets a 'local_name' key.
+                 When None, 'local_name' is absent from the result dicts.
+
     Returns:
         List of dicts with keys:
-        - scientific_name
-        - count_high (detections >= threshold)
-        - count_low (detections < threshold)
-        - score (sum of confidence^4)
-        
+          - scientific_name
+          - count_high  (detections >= threshold)
+          - count_low   (detections < threshold)
+          - score       (sum of confidence^4)
+          - local_name  (only present when labels is not None)
+
         Returns empty list if species_list table doesn't exist.
     """
     if not species_list_exists(db_path):
         logger.warning("species_list table does not exist")
         return []
-    
+
     try:
         conn = get_db_connection(db_path)
-        
         query = """
             SELECT
                 scientific_name,
@@ -2059,58 +2025,70 @@ def get_species_list_with_counts(db_path: Path) -> List[Dict]:
             FROM species_list
             ORDER BY score DESC
         """
-        
         cursor = conn.execute(query)
         results = [dict(row) for row in cursor.fetchall()]
         conn.close()
-        
+
+        if labels is not None:
+            for r in results:
+                r['local_name'] = labels.get(r['scientific_name'], r['scientific_name'])
+
         return results
-        
+
     except Exception as e:
         logger.error(f"Failed to get species list with counts: {e}")
         return []
     
-
-def get_detection_by_id(db_path: Path, detection_id: int) -> Optional[Dict]:
+def get_detection_by_id(
+    db_path: Path,
+    detection_id: int,
+    labels: Optional[dict] = None,
+) -> Optional[Dict]:
     """
     Load single detection with all metadata.
-    
+
     Args:
-        db_path: Path to SQLite database
+        db_path:      Path to SQLite database
         detection_id: Detection ID
-        
+        labels:       Optional dict {scientific_name: local_name}.
+                      When provided, result gets a 'local_name' key.
+
     Returns:
-        Dict with detection + metadata or None if not found
+        Dict with detection + metadata, or None if not found.
     """
     conn = get_db_connection(db_path)
-    
     try:
         cursor = conn.execute("""
-                SELECT
-                    d.id as detection_id,
-                    d.filename,
-                    d.segment_start_utc,
-                    d.segment_end_utc,
-                    d.segment_start_local,
-                    d.segment_end_local,
-                    d.timezone,
-                    d.scientific_name,
-                    d.confidence,
-                    m.timestamp_utc as file_timestamp_utc,
-                    m.timestamp_local as file_timestamp_local,
-                    m.duration_seconds as file_duration_seconds,
-                    m.gps_lat,
-                    m.gps_lon,
-                    m.sample_rate,
-                    m.channels
-                FROM detections d
-                JOIN metadata m ON d.filename = m.filename
-                WHERE d.id = ?
-            """, (detection_id,))
-        
+            SELECT
+                d.id as detection_id,
+                d.filename,
+                d.segment_start_utc,
+                d.segment_end_utc,
+                d.segment_start_local,
+                d.segment_end_local,
+                d.timezone,
+                d.scientific_name,
+                d.confidence,
+                m.timestamp_utc as file_timestamp_utc,
+                m.timestamp_local as file_timestamp_local,
+                m.duration_seconds as file_duration_seconds,
+                m.gps_lat,
+                m.gps_lon,
+                m.sample_rate,
+                m.channels
+            FROM detections d
+            JOIN metadata m ON d.filename = m.filename
+            WHERE d.id = ?
+        """, (detection_id,))
+
         row = cursor.fetchone()
-        return dict(row) if row else None
-        
+        if row is None:
+            return None
+        result = dict(row)
+        if labels is not None:
+            result['local_name'] = labels.get(result['scientific_name'],
+                                               result['scientific_name'])
+        return result
     finally:
         conn.close()
 
@@ -2118,24 +2096,21 @@ def get_detection_by_id(db_path: Path, detection_id: int) -> Optional[Dict]:
 def get_metadata_by_filename(db_path: Path, filename: str) -> Optional[Dict]:
     """
     Load file metadata.
-    
+
     Args:
-        db_path: Path to SQLite database
+        db_path:  Path to SQLite database
         filename: WAV filename
-        
+
     Returns:
         Dict with metadata or None if not found
     """
     conn = get_db_connection(db_path)
-    
     try:
-        cursor = conn.execute("""
-            SELECT * FROM metadata WHERE filename = ?
-        """, (filename,))
-        
+        cursor = conn.execute(
+            "SELECT * FROM metadata WHERE filename = ?", (filename,)
+        )
         row = cursor.fetchone()
         return dict(row) if row else None
-        
     finally:
         conn.close()
 
@@ -2150,30 +2125,31 @@ def query_detections(
     limit: int = 25,
     offset: int = 0,
     sort_by: str = "time",
-    sort_order: str = "asc"
+    sort_order: str = "asc",
+    labels: Optional[dict] = None,
 ) -> List[Dict]:
     """
     Query detections with filters and sorting.
-    
+
     Args:
-        db_path: Path to SQLite database
-        species: Species name (scientific, local, or Czech) - partial match
-        date_from: Start date (inclusive)
-        date_to: End date (inclusive)
-        time_range: Tuple of (start_time, end_time) for time of day filter
+        db_path:        Path to SQLite database
+        species:        Scientific name filter (partial match)
+        date_from:      Start date (inclusive)
+        date_to:        End date (inclusive)
+        time_range:     Tuple of (start_time, end_time) for time-of-day filter
         min_confidence: Minimum confidence threshold
-        limit: Maximum number of results (default: 25)
-        offset: Result offset for pagination
-        sort_by: Sort field - "time", "confidence", or "id" (default: "time")
-        sort_order: Sort order - "asc" or "desc" (default: "asc")
-        
+        limit:          Maximum number of results (default: 25)
+        offset:         Result offset for pagination
+        sort_by:        Sort field – "time", "confidence", or "id"
+        sort_order:     Sort order – "asc" or "desc"
+        labels:         Optional dict {scientific_name: local_name}.
+                        When provided, each result dict gets a 'local_name' key.
+
     Returns:
-        List of detection dicts with metadata
+        List of detection dicts with metadata.
     """
     conn = get_db_connection(db_path)
-    
     try:
-        # Build query
         query = """
             SELECT
                 d.id as detection_id,
@@ -2196,189 +2172,173 @@ def query_detections(
             JOIN metadata m ON d.filename = m.filename
             WHERE 1=1
         """
-        
         params = []
-        
-        # Species filter (match scientific OR local OR Czech name)
+
         if species:
             query += " AND d.scientific_name LIKE ?"
             params.append(f"%{species}%")
-        
-        # DateTime range filter (combines date + time)
+
         if date_from:
-            # If time_range given, use it; otherwise start at 00:00:00
-            if time_range:
-                start_time = time_range[0]
-            else:
-                start_time = time(0, 0, 0)
-            
-            datetime_start = datetime.combine(date_from.date() if isinstance(date_from, datetime) else date_from, start_time)
+            start_time = time_range[0] if time_range else time(0, 0, 0)
+            datetime_start = datetime.combine(
+                date_from.date() if isinstance(date_from, datetime) else date_from,
+                start_time,
+            )
             query += " AND d.segment_start_local >= ?"
             params.append(datetime_start.isoformat())
-        
+
         if date_to:
-            # If time_range given, use it; otherwise end at 23:59:59
-            if time_range:
-                end_time = time_range[1]
-            else:
-                end_time = time(23, 59, 59)
-            
-            datetime_end = datetime.combine(date_to.date() if isinstance(date_to, datetime) else date_to, end_time)
+            end_time = time_range[1] if time_range else time(23, 59, 59)
+            datetime_end = datetime.combine(
+                date_to.date() if isinstance(date_to, datetime) else date_to,
+                end_time,
+            )
             query += " AND d.segment_start_local <= ?"
             params.append(datetime_end.isoformat())
-        
-        # Confidence filter
+
         if min_confidence is not None:
             query += " AND d.confidence >= ?"
             params.append(min_confidence)
-        
-        # Sorting - Map sort_by to actual column names
+
         sort_column_map = {
-            "time": "d.segment_start_local",
+            "time":       "d.segment_start_local",
             "confidence": "d.confidence",
-            "id": "d.id"
+            "id":         "d.id",
         }
-        
-        sort_column = sort_column_map.get(sort_by, "d.segment_start_local")
+        sort_column    = sort_column_map.get(sort_by, "d.segment_start_local")
         sort_direction = "DESC" if sort_order == "desc" else "ASC"
-        
         query += f" ORDER BY {sort_column} {sort_direction}"
-        
-        # Limit and offset
+
         query += " LIMIT ? OFFSET ?"
         params.extend([limit, offset])
-        
-        # Execute query
+
         cursor = conn.execute(query, params)
         results = [dict(row) for row in cursor.fetchall()]
-        
-        logger.debug(
-            f"Query returned {len(results)} detections "
-            f"(sort={sort_by} {sort_order})"
-        )
+
+        if labels is not None:
+            for r in results:
+                r['local_name'] = labels.get(r['scientific_name'], r['scientific_name'])
+
+        logger.debug(f"Query returned {len(results)} detections (sort={sort_by} {sort_order})")
         return results
-        
+
     finally:
         conn.close()
-        
-        
+
 
 def format_score_with_two_significant_digits(score: float, min_score: float) -> str:
     """
     Format score with adaptive precision.
-    
+
     Rules:
     - score >= 10: No decimals (e.g., "123")
     - 10 > score >= 1: 1 decimal (e.g., "9.9")
     - score < 1: 2 significant digits (e.g., "0.000075")
-    
-    Args:
-        score: Score value to format
-        min_score: Minimum score (not used in this version)
-        
-    Returns:
-        Formatted string
     """
     import math
-    
+
     if score == 0:
         return "0"
-    
     if score >= 10:
-        # No decimals
         return f"{score:.0f}"
-    
     elif score >= 1:
-        # 1 decimal place
         return f"{score:.1f}"
-    
     else:
-        # score < 1: Show 2 significant digits
-        # Calculate how many decimals needed
         magnitude = math.floor(math.log10(abs(score)))
-        decimals = -(magnitude - 1)
+        decimals  = -(magnitude - 1)
         return f"{score:.{decimals}f}"
 
 
 def format_detections_column(
-    count_high: int, 
-    count_low: int, 
-    score: float, 
-    min_score: float
+    count_high: int,
+    count_low: int,
+    score: float,
+    min_score: float,
 ) -> str:
     """
     Format detections column for display.
-    
-    Args:
-        count_high: Number of detections >= threshold
-        count_low: Number of detections < threshold
-        score: Score value
-        min_score: Minimum score of all species (for precision)
-        
+
     Returns:
-        Formatted string: "123 (45) {score: 67.8}" or "123 (45) {score: 0.0012}"
+        Formatted string: "123 (45) {score: 67.8}"
     """
     score_str = format_score_with_two_significant_digits(score, min_score)
     return f"{count_high} ({count_low}) {{score: {score_str}}}"
 
 
-def get_recording_date_range(db_path: Path) -> Tuple[Optional[datetime], Optional[datetime]]:
+def get_recording_date_range(
+    db_path: Path,
+) -> Tuple[Optional[datetime], Optional[datetime]]:
     """
     Get the date range of recordings in the database.
-    
-    Args:
-        db_path: Path to SQLite database
-        
+
     Returns:
-        Tuple of (min_date, max_date) as datetime objects
-        Returns (None, None) if no recordings found
+        Tuple of (min_date, max_date) as datetime objects.
+        Returns (None, None) if no recordings found.
     """
     try:
         conn = get_db_connection(db_path)
-        
         query = """
-            SELECT 
+            SELECT
                 MIN(timestamp_local) as min_date,
                 MAX(timestamp_local) as max_date
             FROM metadata
         """
-        
         cursor = conn.execute(query)
-        row = cursor.fetchone()
+        row    = cursor.fetchone()
         conn.close()
-        
+
         if row and row['min_date'] and row['max_date']:
-            min_date = datetime.fromisoformat(row['min_date'])
-            max_date = datetime.fromisoformat(row['max_date'])
-            return (min_date, max_date)
-        else:
-            return (None, None)
-            
+            return (
+                datetime.fromisoformat(row['min_date']),
+                datetime.fromisoformat(row['max_date']),
+            )
+        return (None, None)
+
     except Exception as e:
         logger.error(f"Failed to get recording date range: {e}")
         return (None, None)
 
 
-def search_species_in_list(db_path: Path, search_term: str, limit: int = 10) -> List[str]:
+def search_species_in_list(
+    db_path: Path,
+    search_term: str,
+    limit: int = 10,
+    labels: Optional[dict] = None,
+) -> List[str]:
     """
-    Search species in species_list table with auto-complete.
-    
+    Search species with auto-complete.
+
+    Searches scientific_name in the DB. When labels are provided, also
+    searches local names (Python-side) and includes them in the display string.
+
     Args:
-        db_path: Path to SQLite database
-        search_term: Search term (partial match)
-        limit: Maximum number of results
-        
+        db_path:     Path to SQLite database
+        search_term: Partial match string
+        limit:       Maximum number of results
+        labels:      Optional dict {scientific_name: local_name}.
+                     When provided, search also matches local names and the
+                     display format becomes "Scientific Name (Local Name)".
+
     Returns:
-        List of formatted species strings: "Scientific Name (Local Name)"
-        Returns empty list if no matches or table doesn't exist
+        List of display strings. Internal value (scientific name) can be
+        extracted by splitting on ' (' when labels are present.
+        Returns empty list if no matches or table doesn't exist.
     """
     if not search_term or not species_list_exists(db_path):
         return []
-    
+
+    term_lower = search_term.lower()
+
     try:
         conn = get_db_connection(db_path)
-        
-        # Search in scientific, local, and Czech names
+
+        if labels is not None:
+            # Fetch more candidates so local-name matches aren't cut off
+            # before the Python-side filter runs
+            fetch_limit = limit * 10
+        else:
+            fetch_limit = limit
+
         query = """
             SELECT scientific_name
             FROM species_list
@@ -2386,29 +2346,38 @@ def search_species_in_list(db_path: Path, search_term: str, limit: int = 10) -> 
             ORDER BY score DESC
             LIMIT ?
         """
-
-        cursor = conn.execute(query, (f"%{search_term}%", limit))
-        results = [row['scientific_name'] for row in cursor.fetchall()]
-        
-        results = []
-        for row in cursor.fetchall():
-            scientific = row['scientific_name']
-            local = row['local_name'] or ''
-            
-            # Format: "Scientific Name (Local Name)"
-            if local:
-                results.append(f"{scientific} ({local})")
-            else:
-                results.append(scientific)
-        
+        cursor = conn.execute(query, (f"%{search_term}%", fetch_limit))
+        sci_matches = [row['scientific_name'] for row in cursor.fetchall()]
         conn.close()
-        return results
-        
+
+        if labels is None:
+            return sci_matches[:limit]
+
+        # With labels: merge scientific matches with local-name matches
+        # and format as "Scientific Name (Local Name)"
+        seen: set[str] = set(sci_matches)
+        results: List[str] = []
+
+        # Build display strings for scientific matches first
+        for sci in sci_matches:
+            local = labels.get(sci, '')
+            results.append(f"{sci} ({local})" if local else sci)
+
+        # Add local-name matches not already captured by scientific search
+        for sci, local in labels.items():
+            if sci in seen:
+                continue
+            if term_lower in local.lower():
+                seen.add(sci)
+                results.append(f"{sci} ({local})")
+
+        return results[:limit]
+
     except Exception as e:
         logger.error(f"Failed to search species: {e}")
         return []
-    
-    
+
+
 def get_db_completeness(db_path: Path) -> tuple[int, int]:
     """
     Return (completed_count, total_wav_count) for a folder's database.
@@ -2416,17 +2385,12 @@ def get_db_completeness(db_path: Path) -> tuple[int, int]:
     completed_count: files with status 'completed' in processing_status
     total_wav_count: files in metadata table (= all WAVs ever seen by scout)
 
-    Args:
-        db_path: Path to birdnet_analysis.db
-
     Returns:
         Tuple (completed, total). Returns (0, 0) if DB not readable.
     """
     try:
         conn = get_db_connection(db_path)
-        cursor = conn.execute(
-            "SELECT COUNT(*) FROM processing_status"
-        )
+        cursor = conn.execute("SELECT COUNT(*) FROM processing_status")
         completed = cursor.fetchone()[0]
         cursor = conn.execute("SELECT COUNT(*) FROM metadata")
         total = cursor.fetchone()[0]
@@ -2449,10 +2413,8 @@ def get_db_min_confidence(db_path: Path) -> Optional[float]:
         return float(val) if val is not None else None
     except ValueError:
         return None
-
-
-   
-=== ./source/birdnet_copter/filters.py ===
+    
+    === /workspace/source/birdnet_copter/filters.py ===
 """
 Filter logic and context for detection queries.
 """
@@ -2711,7 +2673,7 @@ def parse_date(date_str: str) -> datetime:
         day = int(parts[2])
         
         return datetime(year, month, day)
-    === ./source/birdnet_copter/gui_elements/db_folder_tree.py ===
+    === /workspace/source/birdnet_copter/gui_elements/db_folder_tree.py ===
 """
 DbFolderTree – checkbox tree widget for selecting folders that contain
 a birdnet_analysis.db SQLite database.
@@ -3092,7 +3054,7 @@ class DbFolderTree:
     def _notify_change(self) -> None:
         """Call the on_change callback with the current selection."""
         if self._on_change is not None:
-            self._on_change(self.selected_folders)=== ./source/birdnet_copter/gui_elements/folder_tree.py ===
+            self._on_change(self.selected_folders)=== /workspace/source/birdnet_copter/gui_elements/folder_tree.py ===
 """
 Folder tree navigator for BirdNET Play.
 
@@ -3511,9 +3473,9 @@ class FolderTree:
         if self._on_root_change:
             self._on_root_change(parent)
 
-            === ./source/birdnet_copter/gui_elements/__init__.py ===
+            === /workspace/source/birdnet_copter/gui_elements/__init__.py ===
 
-=== ./source/birdnet_copter/gui_elements/page_header.py ===
+=== /workspace/source/birdnet_copter/gui_elements/page_header.py ===
 """
 Reusable page header element with optional collapsible description.
 
@@ -3593,7 +3555,7 @@ def page_header(symbol: str, name: str, help_file: str, lang: str = 'de') -> Non
             with ui.expansion('Description').classes(
                 'text-body2 text-grey-8 q-ma-none q-pa-none'
             ).props('switch-toggle-side dense'):
-                ui.label(help_text).classes('text-body2 text-grey-9 q-mt-xs')=== ./source/birdnet_copter/gui_elements/section_card.py ===
+                ui.label(help_text).classes('text-body2 text-grey-9 q-mt-xs')=== /workspace/source/birdnet_copter/gui_elements/section_card.py ===
 """
 Reusable section card context manager with optional collapsible description.
 
@@ -3682,7 +3644,7 @@ def section_card(symbol: str, name: str, help_file: str, lang: str = 'de') -> Se
     Returns:
         SectionCard instance for use as a context manager.
     """
-    return SectionCard(symbol, name, help_file, lang)=== ./source/birdnet_copter/gui_elements/species_search.py ===
+    return SectionCard(symbol, name, help_file, lang)=== /workspace/source/birdnet_copter/gui_elements/species_search.py ===
 """
 Species autocomplete search component for BirdNET Play.
 
@@ -3727,15 +3689,17 @@ class SpeciesSearch:
         on_select: Optional[Callable[[Optional[str]], None]] = None,
         initial_value: Optional[str] = None,
         placeholder: str = 'Search species… (type to filter)',
+        labels: Optional[dict] = None,
     ) -> None:
         self._db_path = db_path
         self._on_select = on_select
         self._value: Optional[str] = initial_value   # scientific name
+        self._labels: Optional[dict] = labels
         self._menu: Optional[ui.menu] = None
         self._input: Optional[ui.input] = None
         self._active_label: Optional[ui.label] = None
         self._container: Optional[ui.element] = None
-
+        
         self._render(placeholder)
 
     # ------------------------------------------------------------------
@@ -3757,6 +3721,10 @@ class SpeciesSearch:
     def set_db(self, db_path: Optional[Path]) -> None:
         """Update the database path (e.g. after DB switch)."""
         self._db_path = db_path
+        
+    def set_labels(self, labels: Optional[dict]) -> None:
+        """Update labels dict (e.g. after language change)."""
+        self._labels = labels
 
     # ------------------------------------------------------------------
     # Rendering
@@ -3806,7 +3774,9 @@ class SpeciesSearch:
 
     def _show_active(self, scientific_name: str) -> None:
         """Switch to 'species selected' display."""
-        self._active_label.set_text(f'🔍 {scientific_name}')
+        local = self._labels.get(scientific_name, '') if self._labels else ''
+        display = f'🔍 {local} ({scientific_name})' if local else f'🔍 {scientific_name}'
+        self._active_label.set_text(display)
         self._active_row.set_visibility(True)
         self._input_col.set_visibility(False)
         if self._menu:
@@ -3831,7 +3801,7 @@ class SpeciesSearch:
                 self._menu.close()
             return
 
-        results = search_species_in_list(self._db_path, term, limit=10)
+        results = search_species_in_list(self._db_path, term, limit=10, labels=self._labels)
         self._menu.clear()
 
         if not results:
@@ -3856,7 +3826,7 @@ class SpeciesSearch:
         self._value = scientific_name
         self._show_active(scientific_name)
         if self._on_select:
-            self._on_select(scientific_name)=== ./source/birdnet_copter/hardware.py ===
+            self._on_select(scientific_name)=== /workspace/source/birdnet_copter/hardware.py ===
 """
 Hardware detection for birdnet-copter.
 
@@ -4064,13 +4034,13 @@ def detect_hardware() -> HardwareInfo:
 
     return info
 
-=== ./source/birdnet_copter/__init__.py ===
+=== /workspace/source/birdnet_copter/__init__.py ===
 """
 BirdNET Audio Playback Tool.
 Play and export BirdNET detection audio snippets with TTS announcements.
 """
 
-__version__ = "0.1.0"=== ./source/birdnet_copter/job_queue.py ===
+__version__ = "0.1.0"=== /workspace/source/birdnet_copter/job_queue.py ===
 """
 Job queue management for birdnet-copter walker process.
 
@@ -4302,7 +4272,7 @@ def drain_progress_queue(bundle: QueueBundle) -> None:
     if updated:
         logger.debug("shared_state updated from progress_queue")
         
-        === ./source/birdnet_copter/keyboard_control.py ===
+        === /workspace/source/birdnet_copter/keyboard_control.py ===
 """
 Thread-based keyboard input for CLI playback control using readchar.
 """
@@ -4445,7 +4415,7 @@ def test_keyboard():
 
 
 if __name__ == "__main__":
-    test_keyboard()=== ./source/birdnet_copter/__main__.py ===
+    test_keyboard()=== /workspace/source/birdnet_copter/__main__.py ===
 """
 Entry point for python -m birdnet_play
 """
@@ -4456,7 +4426,7 @@ from .main import main
 if __name__ == "__main__":
     sys.exit(main())
 
-    === ./source/birdnet_copter/main.py ===
+    === /workspace/source/birdnet_copter/main.py ===
 """
 birdnet-copter – backend main.
 
@@ -4485,7 +4455,7 @@ from .hardware import detect_hardware
 from .job_queue import create_queues, shutdown_scouting, QueueBundle
 from .scout_process import run_scout_process
 from .utils import find_databases_recursive
-from .db_queries import get_analysis_config, create_species_list_table
+from .db_queries import create_species_list_table
 from .scout_watchdog import run_watchdog
 
 
@@ -4507,10 +4477,8 @@ async def _startup_tasks(app_state: AppState) -> None:
 
     app_state.active_db = app_state.available_dbs[0]
     logger.info(f"Active database: {app_state.active_db}")
-
-    lang = get_analysis_config(app_state.active_db, 'local_name_shortcut')
-    app_state.language_code = lang if lang else 'de'
-    logger.info(f"Language: {app_state.language_code}")
+    # Bird language stays at default 'de' – configurable via Hangar
+    logger.info(f"Bird language: {app_state.bird_language_code}")
 
 
 # ---------------------------------------------------------------------------
@@ -4520,11 +4488,10 @@ async def _startup_tasks(app_state: AppState) -> None:
 def _start_scouting(
     bundle: QueueBundle,
     use_gpu: bool,
-    language_code: str,
 ) -> multiprocessing.Process:
     p = multiprocessing.Process(
         target=run_scout_process,
-        args=(bundle, use_gpu, language_code),
+        args=(bundle, use_gpu),
         name="scouting_flight",
         daemon=False,
     )
@@ -4546,7 +4513,6 @@ def start_scout_process(bundle: QueueBundle) -> None:
     p = _start_scouting(
         bundle=bundle,
         use_gpu=app_state.use_gpu,
-        language_code=app_state.language_code,
     )
     app.state.scout_process = p
     logger.info("Scout process started on demand")
@@ -4608,6 +4574,12 @@ def main() -> int:
     shared_state = manager.dict()
     shared_state['jobs'] = []
     shared_state['walker_status'] = 'idle'
+    
+    from .task_status import ALL_TASK_KEYS
+    shared_state['tasks'] = {
+        key: {'running': False, 'label': '', 'progress': None}
+        for key in ALL_TASK_KEYS
+    }
 
     app_state.shared_state = shared_state
 
@@ -4651,7 +4623,8 @@ def main() -> int:
     from . import pages  # noqa: F401
 
     logger.info("Starting NiceGUI server on http://0.0.0.0:8090")
-    ui.run(port=8090, reload=False, show=False)
+    app.add_static_files('/static', Path(__file__).parent / 'pages' / 'static')
+    ui.run(port=8090, reload=False, show=False, favicon='/static/icons/favicon.svg')
 
     # --- Shutdown ---
     logger.info("GUI server stopped – shutting down scout process")
@@ -4665,7 +4638,7 @@ def main() -> int:
 
     manager.shutdown()
     logger.success("birdnet-copter stopped")
-    return 0=== ./source/birdnet_copter/pages/audio_player.py ===
+    return 0=== /workspace/source/birdnet_copter/pages/audio_player.py ===
 """
 Audio Player page for BirdNET Play.
 
@@ -4703,8 +4676,10 @@ from ..db_queries import (
     query_detections,
     get_recording_date_range,
 )
+from ..bird_language import load_labels
 from ..filters import DetectionFilter
 from ..player import AudioPlayer, export_detections, export_detections_mp3
+from ..task_status import set_task_running, TASK_AUDIO_GEN
 
 
 # ---------------------------------------------------------------------------
@@ -4727,6 +4702,8 @@ async def audio_player() -> None:
                   on_click=lambda: ui.navigate.to('/')) \
             .props('no-caps')
         return
+    
+    labels = load_labels(state.bird_language_code)
 
     # -----------------------------------------------------------------------
     # Page-local state
@@ -4747,6 +4724,7 @@ async def audio_player() -> None:
                     db_path=state.active_db,
                     on_select=lambda s: setattr(state, 'ap_filter_species', s),
                     initial_value=state.ap_filter_species,
+                    labels=labels,
                 )
 
             def _open_xc():
@@ -5284,7 +5262,8 @@ async def audio_player() -> None:
             detections = await loop.run_in_executor(
                 None,
                 lambda: query_detections(
-                    state.active_db, **det_filter.to_query_params()
+                    state.active_db, **det_filter.to_query_params(),
+                    labels=labels,
                 )
             )
         except Exception as e:
@@ -5373,6 +5352,7 @@ async def audio_player() -> None:
             return
 
         state.audio_generation_running = True
+        set_task_running(state.shared_state, TASK_AUDIO_GEN, True, 'Generating audio…')
         state.audio_generation_progress = 0.0
         n = len(state.detections)
 
@@ -5384,7 +5364,6 @@ async def audio_player() -> None:
         player_obj = AudioPlayer(state.active_db, state.audio_frame_duration)
         audio_opts = state.get_audio_options()
         filter_ctx = page.get('filter_context', {})
-        lang = state.language_code
         disable_tts = (
             audio_opts['bird_name_option'] == 'none'
             and not audio_opts['say_audio_number']
@@ -5407,7 +5386,7 @@ async def audio_player() -> None:
                         lambda d=det, idx=i: player_obj.prepare_detection_audio_web(
                             d,
                             audio_number=idx + 1,
-                            language_code=lang,
+                            language_code=state.bird_language_code,
                             filter_context=filter_ctx,
                             audio_options=audio_opts,
                             disable_tts=disable_tts,
@@ -5439,12 +5418,15 @@ async def audio_player() -> None:
 
                 if not first_file_rendered:
                     player_html = _build_player_html(json.dumps([file_entry])).replace('`', '\\`')
-                    with client:
-                        await ui.run_javascript(
-                            f'document.getElementById("c{player_container.id}").innerHTML = `{player_html}`;',
-                            timeout=5.0,
-                        )
-                    player_container.set_visibility(True)
+                    try:
+                        with client:
+                            await ui.run_javascript(
+                                f'document.getElementById("c{player_container.id}").innerHTML = `{player_html}`;',
+                                timeout=5.0,
+                            )
+                        player_container.set_visibility(True)
+                    except Exception as e:
+                        logger.warning(f"run_javascript (html inject) failed: {e}")
                     try:
                         with client:
                             await ui.run_javascript(
@@ -5467,13 +5449,16 @@ async def audio_player() -> None:
 
                 else:
                     entry_json = json.dumps(file_entry)
-                    with client:
-                        await ui.run_javascript(
-                            f'window.pendingAudioFiles = '
-                            f'(window.pendingAudioFiles || []);'
-                            f'window.pendingAudioFiles.push({entry_json});',
-                            timeout=5.0,
-                        )
+                    try:
+                        with client:
+                            await ui.run_javascript(
+                                f'window.pendingAudioFiles = '
+                                f'(window.pendingAudioFiles || []);'
+                                f'window.pendingAudioFiles.push({entry_json});',
+                                timeout=5.0,
+                            )
+                    except Exception as e:
+                        logger.warning(f"run_javascript (push audio) failed: {e}")
                 # Update progress
                 progress = (i + 1) / n
                 state.audio_generation_progress = progress
@@ -5485,6 +5470,7 @@ async def audio_player() -> None:
             raise
         finally:
             state.audio_generation_running = False
+            set_task_running(state.shared_state, TASK_AUDIO_GEN, False, '')
             gen_progress_row.set_visibility(False)
 
     # -----------------------------------------------------------------------
@@ -5501,7 +5487,7 @@ async def audio_player() -> None:
                 None,
                 lambda: export_detections(
                     state.active_db, export_dir, state.detections,
-                    state.language_code,
+                    state.bird_language_code,
                     page.get('filter_context', {}),
                     state.get_audio_options(),
                     state.audio_frame_duration,
@@ -5524,7 +5510,7 @@ async def audio_player() -> None:
                 None,
                 lambda: export_detections_mp3(
                     state.active_db, export_dir, state.detections,
-                    state.language_code,
+                    state.bird_language_code,
                     page.get('filter_context', {}),
                     state.get_audio_options(),
                     state.audio_frame_duration,
@@ -5567,25 +5553,31 @@ async def audio_player() -> None:
                         })
                 if files:
                     player_html = _build_player_html(json.dumps(files)).replace('`', '\\`')
-                    await ui.run_javascript(
-                        f'document.getElementById("c{player_container.id}").innerHTML = `{player_html}`;',
-                        timeout=5.0,
-                    )
-                    player_container.set_visibility(True)
-                    await ui.run_javascript(
-                        f"""
-                        (function poll(attempts) {{
-                          var a = document.getElementById('bp-audio');
-                          if (a) {{
-                            {_build_player_js(json.dumps(files))}
-                          }} else if (attempts > 0) {{
-                            setTimeout(function() {{ poll(attempts - 1); }}, 100);
-                          }}
-                        }})(20);
-                        """,
-                        timeout=5.0,
-                    )
-                    === ./source/birdnet_copter/pages/database_overview.py ===
+                    try:
+                        await ui.run_javascript(
+                            f'document.getElementById("c{player_container.id}").innerHTML = `{player_html}`;',
+                            timeout=5.0,
+                        )
+                        player_container.set_visibility(True)
+                    except Exception as e:
+                        logger.warning(f"run_javascript (cache html inject) failed: {e}")
+                    try:
+                        await ui.run_javascript(
+                            f"""
+                            (function poll(attempts) {{
+                              var a = document.getElementById('bp-audio');
+                              if (a) {{
+                                {_build_player_js(json.dumps(files))}
+                              }} else if (attempts > 0) {{
+                                setTimeout(function() {{ poll(attempts - 1); }}, 100);
+                              }}
+                            }})(20);
+                            """,
+                            timeout=5.0,
+                        )
+                    except Exception as e:
+                        logger.warning(f"run_javascript (cache player js) failed: {e}")
+                    === /workspace/source/birdnet_copter/pages/database_overview.py ===
 """
 Database Overview page.
 Covers: page route, layout, folder tree, DB info, actualize button, notes field,
@@ -5615,6 +5607,8 @@ from shared.db_queries import (
     get_all_metadata,
     get_recording_date_range,
 )
+from ..bird_language import load_labels
+from ..task_status import run_with_loading
 
 
 # ---------------------------------------------------------------------------
@@ -5681,8 +5675,6 @@ async def database_overview() -> None:
             if db_path != state.active_db:
                 state.reset_filter_state()
                 state.active_db = db_path
-                lang = get_analysis_config(db_path, 'local_name_shortcut')
-                state.language_code = lang if lang else 'de'
                 logger.info(f"Switched to database: {db_path}")
             _refresh_db_info()
             _render_recording_files.refresh()
@@ -5690,7 +5682,6 @@ async def database_overview() -> None:
             _update_sidebar(None)
         else:
             state.active_db = None
-            state.language_code = 'de'
             _refresh_db_info()
             _render_recording_files.refresh()
             _render_species_list.refresh()
@@ -5714,7 +5705,6 @@ async def database_overview() -> None:
     ui.label('📊 Database Information').classes('text-h6 q-mb-xs')
 
     with ui.row().classes('gap-4 items-start') as db_info_row:
-        metric_lang    = ui.column()
         metric_conf    = ui.column()
         metric_created = ui.column()
         metric_species = ui.column()
@@ -5741,14 +5731,12 @@ async def database_overview() -> None:
         actualize_row.set_visibility(True)
         notes_section.set_visibility(True)
 
-        lang     = get_analysis_config(db, 'local_name_shortcut') or '–'
         conf     = get_analysis_config(db, 'confidence_threshold')
         conf_str = f"{float(conf)*100:.0f}%" if conf else '–'
         created  = get_analysis_config(db, 'created_at') or '–'
         count    = get_species_count(db)
         count_str = str(count) if count > 0 else 'not available'
 
-        _render_metric(metric_lang,    'Language',             lang)
         _render_metric(metric_conf,    'Confidence Threshold', conf_str)
         _render_metric(metric_created, 'Created',              created)
         _render_metric(metric_species, 'Species',              count_str)
@@ -5780,9 +5768,12 @@ async def database_overview() -> None:
         act_spinner.set_visibility(True)
         act_status.set_text('Updating…')
         try:
-            loop = asyncio.get_event_loop()
-            success = await loop.run_in_executor(
-                None, create_species_list_table, state.active_db
+            success = await run_with_loading(
+                act_btn,
+                create_species_list_table,
+                state.active_db,
+                shared_state=state.shared_state,
+                label='Building species list…',
             )
             if success:
                 count = get_species_count(state.active_db)
@@ -5795,7 +5786,6 @@ async def database_overview() -> None:
             act_status.set_text(f'❌ Error: {e}')
         finally:
             page['actualize_running'] = False
-            act_btn.enable()
             act_spinner.set_visibility(False)
 
     ui.separator().classes('q-my-md')
@@ -5897,7 +5887,8 @@ async def database_overview() -> None:
             ui.label('No database selected.').classes('text-caption text-grey-6')
             return
 
-        species_list = get_species_list_with_counts(state.active_db)
+        labels = load_labels(state.bird_language_code)
+        species_list = get_species_list_with_counts(state.active_db, labels=labels)
         if not species_list:
             ui.label(
                 '⚠️ Species list not available. '
@@ -5912,8 +5903,7 @@ async def database_overview() -> None:
         for s in species_list:
             grid_rows.append({
                 'scientific_name': s['scientific_name'],
-                'local_name':      s['local_name'] or '',
-                'name_cs':         s['name_cs'] or '',
+                'local_name':      s.get('local_name') or '',
                 'detections':      format_detections_column(
                                        s['count_high'], s['count_low'],
                                        s['score'], min_score,
@@ -5931,10 +5921,6 @@ async def database_overview() -> None:
                 'width': 250, 'sortable': True, 'filter': True, 'resizable': True,
             },
             {
-                'headerName': 'Czech Name', 'field': 'name_cs',
-                'width': 200, 'sortable': True, 'filter': True, 'resizable': True,
-            },
-            {
                 'headerName': 'Detections (≥70% / all) {score}', 'field': 'detections',
                 'width': 260, 'sortable': False, 'filter': False, 'resizable': True,
             },
@@ -5943,7 +5929,7 @@ async def database_overview() -> None:
                 'hide': True, 'sort': 'desc',
             },
         ]
-
+        
         grid = ui.aggrid({
             'columnDefs': grid_cols,
             'rowData': grid_rows,
@@ -6019,15 +6005,15 @@ def _build_meta_header(state: AppState) -> dict:
 
 
 async def _get_all_rows(state: AppState) -> List[Dict]:
-    species_list = get_species_list_with_counts(state.active_db)
+    labels = load_labels(state.bird_language_code)
+    species_list = get_species_list_with_counts(state.active_db, labels=labels)
     if not species_list:
         return []
     min_score = min(s['score'] for s in species_list)
     return [
         {
             'Scientific Name': s['scientific_name'],
-            'Local Name':      s['local_name'] or '',
-            'Czech Name':      s['name_cs'] or '',
+            'Local Name':      s.get('local_name') or '',
             'Detections':      format_detections_column(
                                    s['count_high'], s['count_low'],
                                    s['score'], min_score,
@@ -6050,7 +6036,6 @@ async def _download_csv(state: AppState, grid: ui.aggrid, scope: str, client) ->
                     {
                         'Scientific Name': r.get('scientific_name', ''),
                         'Local Name':      r.get('local_name', ''),
-                        'Czech Name':      r.get('name_cs', ''),
                         'Detections':      r.get('detections', ''),
                     }
                     for r in (raw or [])
@@ -6092,7 +6077,6 @@ async def _download_excel(state: AppState, grid: ui.aggrid, scope: str, client) 
                     {
                         'Scientific Name': r.get('scientific_name', ''),
                         'Local Name':      r.get('local_name', ''),
-                        'Czech Name':      r.get('name_cs', ''),
                         'Detections':      r.get('detections', ''),
                     }
                     for r in (raw or [])
@@ -6134,7 +6118,7 @@ async def _download_excel(state: AppState, grid: ui.aggrid, scope: str, client) 
 
         except Exception as e:
             logger.error(f"Excel download failed: {e}")
-            ui.notify(f'Excel export failed: {e}', type='negative')=== ./source/birdnet_copter/pages/exploration_area.py ===
+            ui.notify(f'Excel export failed: {e}', type='negative')=== /workspace/source/birdnet_copter/pages/exploration_area.py ===
 """
 Exploration Area page – database selection and analysis overview.
 
@@ -6175,6 +6159,8 @@ from ..db_queries import (
     get_all_metadata,
     get_recording_date_range,
 )
+from ..bird_language import load_labels
+from ..task_status import run_with_loading
 
 
 # ---------------------------------------------------------------------------
@@ -6249,8 +6235,6 @@ async def exploration_area() -> None:
                     if db_path != state.active_db:
                         state.reset_filter_state()
                         state.active_db = db_path
-                        lang = get_analysis_config(db_path, 'local_name_shortcut')
-                        state.language_code = lang if lang else 'de'
                         logger.info(f'Switched to database: {db_path}')
                     _refresh_db_info()
                     _render_recording_files.refresh()
@@ -6259,7 +6243,6 @@ async def exploration_area() -> None:
                     asyncio.create_task(_run_actualize())
                 else:
                     state.active_db = None
-                    state.language_code = 'de'
                     _refresh_db_info()
                     _render_recording_files.refresh()
                     _render_species_list.refresh()
@@ -6288,7 +6271,6 @@ async def exploration_area() -> None:
         ui.separator().classes('q-my-sm')
 
         with ui.row().classes('gap-4 items-start') as db_info_row:
-            metric_lang    = ui.column()
             metric_conf    = ui.column()
             metric_created = ui.column()
             metric_species = ui.column()
@@ -6342,14 +6324,12 @@ async def exploration_area() -> None:
         no_db_hint.set_visibility(False)
         notes_section.set_visibility(True)
 
-        lang      = get_analysis_config(db, 'local_name_shortcut') or '–'
         conf      = get_analysis_config(db, 'confidence_threshold')
         conf_str  = f'{float(conf)*100:.0f}%' if conf else '–'
         created   = get_analysis_config(db, 'created_at') or '–'
         count     = get_species_count(db)
         count_str = str(count) if count > 0 else 'not available'
 
-        _render_metric(metric_lang,    'Language',             lang)
         _render_metric(metric_conf,    'Confidence Threshold', conf_str)
         _render_metric(metric_created, 'Created',              created)
         _render_metric(metric_species, 'Species',              count_str)
@@ -6363,9 +6343,12 @@ async def exploration_area() -> None:
             return
         page['actualize_running'] = True
         try:
-            loop = asyncio.get_event_loop()
-            success = await loop.run_in_executor(
-                None, create_species_list_table, db
+            success = await run_with_loading(
+                [],
+                create_species_list_table,
+                db,
+                shared_state=state.shared_state,
+                label='Building species list…',
             )
             if success:
                 _refresh_db_info()
@@ -6472,7 +6455,8 @@ async def exploration_area() -> None:
             ui.label('No database selected.').classes('text-caption text-grey-6')
             return
 
-        species_list = get_species_list_with_counts(db)
+        labels = load_labels(state.bird_language_code)
+        species_list = get_species_list_with_counts(db, labels=labels)
         if not species_list:
             ui.label(
                 '⚠️ Species list not available. '
@@ -6487,8 +6471,7 @@ async def exploration_area() -> None:
         for s in species_list:
             grid_rows.append({
                 'scientific_name': s['scientific_name'],
-                'local_name':      s['local_name'] or '',
-                'name_cs':         s['name_cs'] or '',
+                'local_name':      s.get('local_name') or '',
                 'detections':      format_detections_column(
                                        s['count_high'], s['count_low'],
                                        s['score'], min_score,
@@ -6504,10 +6487,6 @@ async def exploration_area() -> None:
             {
                 'headerName': 'Local Name', 'field': 'local_name',
                 'width': 250, 'sortable': True, 'filter': True, 'resizable': True,
-            },
-            {
-                'headerName': 'Czech Name', 'field': 'name_cs',
-                'width': 200, 'sortable': True, 'filter': True, 'resizable': True,
             },
             {
                 'headerName': 'Detections (≥70% / all) {score}', 'field': 'detections',
@@ -6598,15 +6577,15 @@ async def _get_all_rows(state: AppState) -> List[Dict]:
     db = state.active_db
     if db is None:
         return []
-    species_list = get_species_list_with_counts(db)
+    labels = load_labels(state.bird_language_code)
+    species_list = get_species_list_with_counts(db, labels=labels)
     if not species_list:
         return []
     min_score = min(s['score'] for s in species_list)
     return [
         {
             'Scientific Name': s['scientific_name'],
-            'Local Name':      s['local_name'] or '',
-            'Czech Name':      s['name_cs'] or '',
+            'Local Name':      s.get('local_name') or '',
             'Detections':      format_detections_column(
                                    s['count_high'], s['count_low'],
                                    s['score'], min_score,
@@ -6636,7 +6615,6 @@ async def _download_csv(
                     {
                         'Scientific Name': r.get('scientific_name', ''),
                         'Local Name':      r.get('local_name', ''),
-                        'Czech Name':      r.get('name_cs', ''),
                         'Detections':      r.get('detections', ''),
                     }
                     for r in (raw or [])
@@ -6689,7 +6667,6 @@ async def _download_excel(
                     {
                         'Scientific Name': r.get('scientific_name', ''),
                         'Local Name':      r.get('local_name', ''),
-                        'Czech Name':      r.get('name_cs', ''),
                         'Detections':      r.get('detections', ''),
                     }
                     for r in (raw or [])
@@ -6737,7 +6714,7 @@ async def _download_excel(
 
         except Exception as e:
             logger.error(f'Excel download failed: {e}')
-            ui.notify(f'Excel export failed: {e}', type='negative')=== ./source/birdnet_copter/pages/hangar.py ===
+            ui.notify(f'Excel export failed: {e}', type='negative')=== /workspace/source/birdnet_copter/pages/hangar.py ===
 """
 Hangar page – technical base configuration.
 
@@ -6761,6 +6738,8 @@ from ..gui_elements.page_header import page_header
 from ..gui_elements.section_card import section_card
 from ..gui_elements.folder_tree import FolderTree
 from ..utils import find_databases_recursive
+from ..bird_language import get_available_languages
+from ..task_status import run_with_loading
 
 
 # ---------------------------------------------------------------------------
@@ -6787,42 +6766,44 @@ async def hangar() -> None:
         if hw is None:
             ui.label('Hardware info not available.').classes('text-caption text-grey-6')
         else:
-            with ui.grid(columns=2).classes('gap-x-8 gap-y-1'):
+            with ui.row().classes('items-start gap-8'):
+                ui.image('static/icons/favicon.svg').classes('h-auto').style('width: 80px;')
+                with ui.grid(columns=2).classes('gap-x-8 gap-y-1'):
 
-                # GPU
-                ui.label('GPU').classes('text-caption text-grey-6 font-bold')
-                if hw.has_nvidia_gpu and hw.gpu_name:
-                    parts = [hw.gpu_name]
-                    if hw.gpu_vram_gb is not None:
-                        parts.append(f'{hw.gpu_vram_gb:.0f} GB VRAM')
-                    if hw.gpu_shaders is not None:
-                        parts.append(f'{hw.gpu_shaders} shaders')
-                    ui.label(', '.join(parts)).classes('text-body2')
-                else:
-                    ui.label('no NVIDIA GPU').classes('text-body2 text-grey-6')
+                    # GPU
+                    ui.label('GPU').classes('text-caption text-grey-6 font-bold')
+                    if hw.has_nvidia_gpu and hw.gpu_name:
+                        parts = [hw.gpu_name]
+                        if hw.gpu_vram_gb is not None:
+                            parts.append(f'{hw.gpu_vram_gb:.0f} GB VRAM')
+                        if hw.gpu_shaders is not None:
+                            parts.append(f'{hw.gpu_shaders} shaders')
+                        ui.label(', '.join(parts)).classes('text-body2')
+                    else:
+                        ui.label('no NVIDIA GPU').classes('text-body2 text-grey-6')
 
-                # CPU
-                ui.label('CPU').classes('text-caption text-grey-6 font-bold')
-                ui.label(
-                    f'{hw.cpu_count_logical} logical cores'
-                    f' ({hw.cpu_count_physical} physical)'
-                ).classes('text-body2')
+                    # CPU
+                    ui.label('CPU').classes('text-caption text-grey-6 font-bold')
+                    ui.label(
+                        f'{hw.cpu_count_logical} logical cores'
+                        f' ({hw.cpu_count_physical} physical)'
+                    ).classes('text-body2')
 
-                # RAM
-                ui.label('RAM').classes('text-caption text-grey-6 font-bold')
-                ui.label(f'{hw.ram_total_gb:.0f} GB').classes('text-body2')
+                    # RAM
+                    ui.label('RAM').classes('text-caption text-grey-6 font-bold')
+                    ui.label(f'{hw.ram_total_gb:.0f} GB').classes('text-body2')
 
-                # Cores for inference
-                ui.label('Cores for inference').classes('text-caption text-grey-6 font-bold')
-                note = ' ⚠ sleep mode active' if hw.sleep_flag else ''
-                ui.label(
-                    f'{hw.cpu_count_for_inference}{note}'
-                ).classes('text-body2' + (' text-orange-7' if hw.sleep_flag else ''))
+                    # Cores for inference
+                    ui.label('Cores for inference').classes('text-caption text-grey-6 font-bold')
+                    note = ' ⚠ sleep mode active' if hw.sleep_flag else ''
+                    ui.label(
+                        f'{hw.cpu_count_for_inference}{note}'
+                    ).classes('text-body2' + (' text-orange-7' if hw.sleep_flag else ''))
 
     # -----------------------------------------------------------------------
     # Section 2: Root Path
     # -----------------------------------------------------------------------
-    with section_card('🌍', 'Flying Area: Root Path / Global DB Path', 'hangar_root_path'):
+    with section_card('🌍', 'Flying Area: Root Path', 'hangar_root_path'):
         root_label = ui.label(str(state.root_path)).classes('text-body2 text-grey-10 q-mb-xs')
         root_dialog_btn = ui.button('📁 Change', on_click=lambda: asyncio.create_task(_open_root_dialog())).props('no-caps')
 
@@ -6851,8 +6832,13 @@ async def hangar() -> None:
                         return
                     state.root_path = new_root
                     root_label.set_text(str(new_root))
-                    loop = asyncio.get_event_loop()
-                    dbs = await loop.run_in_executor(None, find_databases_recursive, new_root)
+                    dbs = await run_with_loading(
+                        root_dialog_btn,
+                        find_databases_recursive,
+                        new_root,
+                        shared_state=state.shared_state,
+                        label='Scanning folders…',
+                    )
                     state.available_dbs = dbs
                     state.active_db = dbs[0] if dbs else None
                     logger.info(f'Root path changed to: {new_root}')
@@ -6944,7 +6930,48 @@ async def hangar() -> None:
 
                 ui.button('✔ Confirm', on_click=_confirm_global).props('no-caps color=primary')
 
-        global_dialog.open()=== ./source/birdnet_copter/pages/heatmap_page.py ===
+        global_dialog.open()
+        
+    # -----------------------------------------------------------------------
+    # Section 5: Language Configuration
+    # -----------------------------------------------------------------------
+    with section_card('🌍', 'Language Configuration', 'hangar_language'):
+
+        with ui.row().classes('gap-8 items-start'):
+
+            # --- Bird name language (fully active) ---
+            with ui.column().classes('gap-1'):
+                ui.label('Bird Name Language').classes('text-caption text-grey-6 font-bold')
+                bird_lang_select = ui.select(
+                    options=get_available_languages(),
+                    value=state.bird_language_code,
+                    label='Bird Name Language',
+                    on_change=lambda e: _on_bird_lang_change(e.value),
+                ).props('outlined dense').classes('w-40')
+                ui.label('Default: de (Deutsch)').classes('text-caption text-grey-6')
+
+            # --- GUI language (not yet active) ---
+            with ui.column().classes('gap-1'):
+                ui.label('GUI Language').classes('text-caption text-grey-6 font-bold')
+                ui.select(
+                    options=['de', 'en'],
+                    value=state.gui_language_code,
+                    label='GUI Language',
+                ).props('outlined dense disable').classes('w-40')
+                ui.label('Not yet implemented').classes('text-caption text-grey-6')
+
+    def _on_bird_lang_change(lang: str) -> None:
+        available = get_available_languages()
+        if lang not in available:
+            ui.notify(
+                f"Language '{lang}' not available, resetting to 'de'",
+                type='warning',
+            )
+            state.bird_language_code = 'de'
+            bird_lang_select.set_value('de')
+        else:
+            state.bird_language_code = lang
+            logger.info(f"Bird language changed to: {lang}")=== /workspace/source/birdnet_copter/pages/heatmap_page.py ===
 """
 Activity Heatmap page for BirdNET Play.
 
@@ -6975,6 +7002,8 @@ from ..gui_elements.section_card import section_card
 from ..gui_elements.species_search import SpeciesSearch
 from ..player import AudioPlayer
 from ..db_queries import query_detections, get_recording_date_range
+from ..bird_language import load_labels
+from ..task_status import run_with_loading
 
 import uuid
 from nicegui import app as _nicegui_app
@@ -7249,6 +7278,8 @@ async def heatmap_page() -> None:
             .props("no-caps")
         return
 
+    labels = load_labels(state.bird_language_code)
+
     # ------------------------------------------------------------------
     # Page-local mutable state (dict avoids closure rebinding issues)
     # ------------------------------------------------------------------
@@ -7277,6 +7308,7 @@ async def heatmap_page() -> None:
                     db_path=state.active_db,
                     on_select=lambda s: setattr(state, "hm_filter_species", s),
                     initial_value=state.hm_filter_species,
+                    labels=labels,
                 )
 
                 def _on_conf_change(e):
@@ -7369,11 +7401,9 @@ async def heatmap_page() -> None:
                 ui.notify("Date From must be ≤ Date To.", type="warning")
                 return
 
-            apply_btn.props("loading")
             try:
-                loop = asyncio.get_event_loop()
-                detections = await loop.run_in_executor(
-                    None,
+                detections = await run_with_loading(
+                    apply_btn,
                     lambda: query_detections(
                         db_path=state.active_db,
                         species=state.hm_filter_species or None,
@@ -7384,12 +7414,14 @@ async def heatmap_page() -> None:
                         offset=0,
                         sort_by="time",
                         sort_order="asc",
+                        labels=labels,
                     ),
+                    shared_state=state.shared_state,
+                    label='Querying detections…',
                 )
             except Exception as exc:
                 logger.exception("Heatmap query failed")
                 ui.notify(f"Query error: {exc}", type="negative")
-                apply_btn.props(remove="loading")
                 return
 
             if not detections:
@@ -7439,7 +7471,6 @@ async def heatmap_page() -> None:
 
             export_btn.enable()
             download_section.set_visibility(True)
-            apply_btn.props(remove="loading")
             ui.notify(f"Heatmap updated ({len(detections)} detections).", type="positive")
 
         apply_btn = ui.button("▶ Apply Filters", on_click=_apply_filters) \
@@ -7634,6 +7665,7 @@ async def _open_click_dialog(
                             limit=DIALOG_MAX_DETECTIONS,
                             sort_by="confidence",
                             sort_order="desc",
+                            labels=labels,
                         ),
                     )
                     
@@ -7813,12 +7845,12 @@ def _export_csv(state: AppState, page: Dict[str, Any]) -> None:
     )
     filename = f"heatmap_{species_part}_{date_from_part}_{date_to_part}.csv"
 
-    ui.download(csv_bytes, filename=filename)=== ./source/birdnet_copter/pages/__init__.py ===
+    ui.download(csv_bytes, filename=filename)=== /workspace/source/birdnet_copter/pages/__init__.py ===
 from . import hangar            # noqa: F401
 from . import scouting_flight   # noqa: F401
 from . import exploration_area  # noqa: F401
 from . import audio_player      # noqa: F401
-from . import heatmap_page      # noqa: F401=== ./source/birdnet_copter/pages/layout.py ===
+from . import heatmap_page      # noqa: F401=== /workspace/source/birdnet_copter/pages/layout.py ===
 """
 Shared page layout for BirdNET Copter.
 
@@ -7839,6 +7871,22 @@ Layout structure:
 from nicegui import ui, app as nicegui_app, context
 
 from ..app_state import AppState
+
+
+# ---------------------------------------------------------------------------
+# Header size configuration  ('sm' | 'md' | 'lg')
+# ---------------------------------------------------------------------------
+HEADER_SIZE = 'md'
+
+# Spinner-Icon static and animated
+ICON_STATIC   = 'static/icons/birdnet_copter_spinner_static.svg'
+ICON_ANIMATED = 'static/icons/birdnet_copter_spinner_animated.svg'
+
+_HEADER_SIZES = {
+    'sm': {'py': 'py-1', 'icon': 'w-5 h-5',  'title': 'text-h6', 'body': 'text-body2', 'caption': 'text-caption', 'spinner': 'sm'},
+    'md': {'py': 'py-3', 'icon': 'w-8 h-8',  'title': 'text-h5', 'body': 'text-body1', 'caption': 'text-body2',   'spinner': 'md'},
+    'lg': {'py': 'py-5', 'icon': 'w-10 h-10', 'title': 'text-h4', 'body': 'text-h6',   'caption': 'text-body1',   'spinner': 'lg'},
+}
 
 
 # ---------------------------------------------------------------------------
@@ -7928,9 +7976,11 @@ def create_layout(app_state: AppState) -> ui.left_drawer:
     # Header
     # ------------------------------------------------------------------
     initial_color = 'bg-red-8' if app_state.gpu_error else 'bg-primary'
+    
+    hs = _HEADER_SIZES[HEADER_SIZE]
 
     with ui.header().classes(
-        f'items-center justify-between {initial_color} text-white px-4 py-1'
+        f'items-center justify-between {initial_color} text-white px-4 {hs["py"]}'
     ) as header:
 
         # Grid with 3 equal columns, all vertically centered
@@ -7940,22 +7990,20 @@ def create_layout(app_state: AppState) -> ui.left_drawer:
             with ui.row().classes('items-center gap-2'):
                 ui.button(icon='menu', on_click=nav_drawer.toggle) \
                     .props('flat dense round color=white')
-                ui.label('birdnet-copter').classes('text-h6 font-bold')
+                header_icon = ui.image(ICON_STATIC).classes(hs['icon'])
+                ui.label('birdnet-copter').classes(f'{hs["title"]} font-bold')
 
             # --- center column: paths ---
             with ui.column().classes('items-center gap-0'):
                 root_label = ui.label(str(app_state.root_path)) \
-                    .classes('text-caption opacity-80')
+                    .classes(f'{hs["caption"]} opacity-80')
                 db_label = ui.label(_relative_db_label(app_state)) \
-                    .classes('text-body2 font-bold')
+                    .classes(f'{hs["body"]} font-bold')
 
             # --- right column: access mode + spinner ---
             with ui.row().classes('items-center justify-end gap-3'):
-                with ui.row().classes('items-center gap-1') as spinner_row:
-                    spinner = ui.spinner(size='sm').classes('text-white')
-                    ui.label('processing…').classes('text-caption')
                 access_text = '🔒 read-only' if app_state.read_only else '✏️ read-write'
-                ui.label(access_text).classes('text-caption')
+                ui.label(access_text).classes(hs['caption'])
 
         # GPU error button – outside the grid so it doesn't affect row height
         gpu_err_btn = ui.button(
@@ -7970,8 +8018,8 @@ def create_layout(app_state: AppState) -> ui.left_drawer:
 
     def _update_spinner():
         try:
-            running = app_state.audio_generation_running
-            spinner_row.set_visibility(running)
+            running = app_state.is_busy()
+            header_icon.set_source(ICON_ANIMATED if running else ICON_STATIC)
         except Exception:
             pass
 
@@ -7993,9 +8041,9 @@ def create_layout(app_state: AppState) -> ui.left_drawer:
             has_error = bool(app_state.gpu_error)
             # Switch header color
             if has_error:
-                header.classes(replace='items-center justify-between bg-red-8 text-white px-4 py-1')
+                header.classes(replace=f'items-center justify-between bg-red-8 text-white px-4 {hs["py"]}')
             else:
-                header.classes(replace='items-center justify-between bg-primary text-white px-4 py-1')
+                header.classes(replace=f'items-center justify-between bg-primary text-white px-4 {hs["py"]}')
             # Show / hide error button
             gpu_err_btn.set_visibility(has_error)
         except Exception:
@@ -8021,7 +8069,7 @@ def create_layout(app_state: AppState) -> ui.left_drawer:
 
     context.client.on_disconnect(_stop_timers)
 
-    return nav_drawer=== ./source/birdnet_copter/pages/scouting_flight.py ===
+    return nav_drawer=== /workspace/source/birdnet_copter/pages/scouting_flight.py ===
 """
 Scouting Flight page – folder selection, job management, scout control.
 
@@ -8500,7 +8548,7 @@ async def scouting_flight() -> None:
     async def _stop_timer() -> None:
         timer.cancel()
 
-    context.client.on_disconnect(_stop_timer)=== ./source/birdnet_copter/player.py ===
+    context.client.on_disconnect(_stop_timer)=== /workspace/source/birdnet_copter/player.py ===
 """
 Audio playback engine for BirdNET detections.
 Combines audio snippets with TTS announcements.
@@ -9249,7 +9297,7 @@ def export_detections_mp3(
     logger.info(f"MP3 export complete: {len(detections)} files in {output_dir}")
     
     
-    === ./source/birdnet_copter/scout_process.py ===
+    === /workspace/source/birdnet_copter/scout_process.py ===
 """
 Scout background process for birdnet-copter.
 
@@ -9296,7 +9344,6 @@ from .database import (
     rebuild_detections,
 )
 from .db_queries import set_analysis_config
-from .birdnet_labels import load_birdnet_labels
 from .job_queue import (
     QueueBundle,
     ScanJob,
@@ -9305,6 +9352,7 @@ from .job_queue import (
     SIGNAL_STOP,
     SIGNAL_SHUTDOWN,
 )
+from .task_status import set_task_running, TASK_SCOUT
 
 
 # ---------------------------------------------------------------------------
@@ -9400,8 +9448,7 @@ def _process_folder(
     bundle: QueueBundle,
     use_gpu: bool,
     stop_flag: list[bool],
-    wait_flag: list[bool],
-    language_code: str,
+    wait_flag: list[bool]
 ) -> None:
     """
     Process all WAV files in job.folder_path.
@@ -9485,8 +9532,6 @@ def _process_folder(
     from .db_queries import get_analysis_config
     if get_analysis_config(db_path, 'min_confidence') is None:
         set_analysis_config(db_path, 'min_confidence', str(job.min_conf))
-    if get_analysis_config(db_path, 'local_name_shortcut') is None:
-        set_analysis_config(db_path, 'local_name_shortcut', language_code)
 
     # --- GPU/CPU device string ---
     device = 'GPU' if use_gpu else 'CPU'
@@ -9605,7 +9650,6 @@ def _process_folder(
 def run_scout_process(
     bundle: QueueBundle,
     use_gpu: bool,
-    language_code: str,
 ) -> None:
     """
     Scout background process entry point.
@@ -9614,13 +9658,12 @@ def run_scout_process(
     Exits cleanly when SIGNAL_SHUTDOWN (None) is received.
 
     Args:
-        bundle:           QueueBundle created by create_queues() in main process
-        translation_list: Species translation data as list of dicts
-                          (converted from karlincam DataFrame in main.py)
-        birdnet_labels:   Dict {scientific_name: local_name} for selected language
-        use_gpu:          If True, BirdNET uses GPU; otherwise CPU
+        bundle:  QueueBundle created by create_queues() in main process
+        use_gpu: If True, BirdNET uses GPU; otherwise CPU
     """
     logger.info("Scout process started")
+    
+    set_task_running(bundle.shared_state, TASK_SCOUT, False, '')
 
     stop_flag = [False]   # [0] = stop after current file
     wait_flag = [False]   # [0] = pause after current batch
@@ -9655,6 +9698,7 @@ def run_scout_process(
         logger.info(f"Scout: starting job {job.job_id[:8]} – {job.folder_path}")
         job.status     = 'flying'
         job.started_at = datetime.now()
+        set_task_running(bundle.shared_state, TASK_SCOUT, True, f'Analysiere: {job.folder_path.name}…')
         _send_progress(bundle, job)
 
         try:
@@ -9663,8 +9707,7 @@ def run_scout_process(
                 bundle=bundle,
                 use_gpu=use_gpu,
                 stop_flag=stop_flag,
-                wait_flag=wait_flag,
-                language_code=language_code,
+                wait_flag=wait_flag
             )
         except Exception as e:
             logger.error(f"Scout: unhandled exception in job {job.job_id[:8]}: {e}")
@@ -9672,10 +9715,13 @@ def run_scout_process(
             job.error_msg   = str(e)
             job.finished_at = datetime.now()
             _send_progress(bundle, job)
+            
+        set_task_running(bundle.shared_state, TASK_SCOUT, False, '')
 
     logger.info("Scout process finished")
     
-    === ./source/birdnet_copter/scout_watchdog.py ===
+    set_task_running(bundle.shared_state, TASK_SCOUT, False, '')
+    === /workspace/source/birdnet_copter/scout_watchdog.py ===
 """
 GPU watchdog for the scout process.
 
@@ -9892,145 +9938,140 @@ async def run_watchdog(
                 low_since = None
 
     except asyncio.CancelledError:
-        logger.info("GPU watchdog cancelled")=== ./source/birdnet_copter/species_translation.py ===
+        logger.info("GPU watchdog cancelled")=== /workspace/source/birdnet_copter/task_status.py ===
 """
-Species name translation table management.
-Downloads and caches translation table from karlincam.cz.
+Task status helpers for birdnet-copter.
+
+Provides a unified API for reporting running background tasks (Type A)
+and wrapping short-lived GUI operations (Type B) with loading indicators.
+
+Type A – background processes (scout, audio generation, …):
+    Call set_task_running() to register / deregister a task in shared_state.
+
+Type B – GUI operations (queries, scans, …):
+    Use run_with_loading() as an async wrapper around run_in_executor calls.
 """
 
-import requests
-from bs4 import BeautifulSoup
-import pandas as pd
-from pathlib import Path
-from datetime import datetime, timedelta
-from loguru import logger
-from .config import SPECIES_CACHE_DIR, SPECIES_CACHE_MAX_AGE_DAYS, SPECIES_TABLE_URL
+from typing import Any, Dict, Optional, Union
+
+from nicegui import ui, run
+
+# ---------------------------------------------------------------------------
+# Task key constants
+# ---------------------------------------------------------------------------
+
+TASK_SCOUT          = 'scout'
+TASK_AUDIO_GEN      = 'audio_gen'
+TASK_GUI_OP         = 'gui_op'
+TASK_EMBEDDING_SYNC = 'embedding_sync'
+TASK_GLOBAL_SYNC    = 'global_sync'
+
+ALL_TASK_KEYS = [
+    TASK_SCOUT,
+    TASK_AUDIO_GEN,
+    TASK_GUI_OP,
+    TASK_EMBEDDING_SYNC,
+    TASK_GLOBAL_SYNC,
+]
 
 
-def download_species_table(cache_dir: str = SPECIES_CACHE_DIR) -> pd.DataFrame:
+# ---------------------------------------------------------------------------
+# Type A helper
+# ---------------------------------------------------------------------------
+
+def set_task_running(
+    shared_state: Any,
+    task_key: str,
+    running: bool,
+    label: str = '',
+    progress: Optional[float] = None,
+) -> None:
     """
-    Download species name translation table from karlincam.cz.
-    
-    Caches result in cache_dir/species_names.csv. If cache exists and is 
-    younger than SPECIES_CACHE_MAX_AGE_DAYS, loads from cache.
-    
+    Register or deregister a background task in shared_state['tasks'].
+
+    Uses a full-dict-replace pattern because multiprocessing.Manager().dict()
+    does not propagate in-place mutations of nested objects.
+
     Args:
-        cache_dir: Directory for caching
-        
-    Returns:
-        DataFrame with columns: ['scientific', 'en', 'de', 'cs']
+        shared_state: The multiprocessing Manager dict (app_state.shared_state
+                      or bundle.shared_state).
+        task_key:     One of the TASK_* constants defined in this module.
+        running:      True while the task is active, False when done.
+        label:        Human-readable status text shown in the GUI header.
+        progress:     Optional 0.0–1.0 progress value; None if not applicable.
     """
-    cache_path = Path(cache_dir) / "species_names.csv"
-    
-    # Check if cache exists and is recent
-    if cache_path.exists():
-        cache_age = datetime.now() - datetime.fromtimestamp(cache_path.stat().st_mtime)
-        if cache_age < timedelta(days=SPECIES_CACHE_MAX_AGE_DAYS):
-            logger.info(f"Loading species table from cache: {cache_path}")
-            return pd.read_csv(cache_path)
-        else:
-            logger.info(f"Cache outdated (age: {cache_age.days} days), downloading fresh table")
-    
-    # Download and parse HTML table
-    try:
-        logger.info(f"Downloading species table from {SPECIES_TABLE_URL}")
-        response = requests.get(SPECIES_TABLE_URL, timeout=30)
-        response.raise_for_status()
-        
-        soup = BeautifulSoup(response.content, 'html.parser')
-        
-        # Find the table
-        table = soup.find('table')
-        if not table:
-            raise ValueError("No table found in HTML")
-        
-        # Parse table headers and rows
-        headers = []
-        header_row = table.find('tr')
-        if header_row:
-            headers = [th.get_text(strip=True) for th in header_row.find_all('td')]
-        
-        # Expected headers: Scientific name, en, de, cs
-        if not headers or len(headers) < 4:
-            raise ValueError(f"Unexpected table headers: {headers}")
-        
-        # Parse data rows
-        data = []
-        for row in table.find_all('tr')[1:]:  # Skip header row
-            cols = row.find_all('td')
-            if len(cols) >= 4:
-                data.append([
-                    cols[0].get_text(strip=True),  # Scientific name
-                    cols[1].get_text(strip=True),  # en
-                    cols[2].get_text(strip=True),  # de
-                    cols[3].get_text(strip=True)   # cs
-                ])
-        
-        if not data:
-            raise ValueError("No data rows found in table")
-        
-        # Create DataFrame
-        df = pd.DataFrame(data, columns=['scientific', 'en', 'de', 'cs'])
-        
-        # Save to cache
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        df.to_csv(cache_path, index=False)
-        logger.info(f"Species table cached: {len(df)} entries in {cache_path}")
-        
-        return df
-        
-    except Exception as e:
-        logger.error(f"Error downloading species table: {e}")
-        
-        # Try to load from cache even if outdated
-        if cache_path.exists():
-            logger.warning("Using outdated cache as fallback")
-            return pd.read_csv(cache_path)
-        else:
-            logger.error("No cache available, returning empty DataFrame")
-            return pd.DataFrame(columns=['scientific', 'en', 'de', 'cs'])
-
-
-
-def translate_species_name(
-    scientific_name: str,
-    translation_table: pd.DataFrame,
-    birdnet_labels: dict
-) -> dict:
-    """
-    Translate scientific name to local language (from BirdNET) and Czech (from web table).
-    
-    Args:
-        scientific_name: Scientific species name (e.g., "Parus major")
-        translation_table: Translation DataFrame from karlincam.cz
-        birdnet_labels: BirdNET labels dict for selected language
-        
-    Returns:
-        dict with keys: 'scientific', 'local', 'cs'
-        Missing translations are filled with scientific name
-    """
-    # Get local name from BirdNET labels
-    local_name = birdnet_labels.get(scientific_name, scientific_name)
-    
-    # Get Czech from web translation table
-    match = translation_table[translation_table['scientific'] == scientific_name]
-    
-    if not match.empty:
-        row = match.iloc[0]
-        cs_name = row['cs']
-    else:
-        # Not found in web table - use scientific name as fallback
-        logger.debug(f"Species not found in web translation table: {scientific_name}")
-        cs_name = scientific_name
-    
-    return {
-        'scientific': scientific_name,
-        'local': local_name,
-        'cs': cs_name
+    tasks: Dict = dict(shared_state.get('tasks', {}))
+    tasks[task_key] = {
+        'running':  running,
+        'label':    label,
+        'progress': progress,
     }
+    shared_state['tasks'] = tasks
 
 
-=== ./source/birdnet_copter/tts.py ===
+# ---------------------------------------------------------------------------
+# Type B helper
+# ---------------------------------------------------------------------------
+
+async def run_with_loading(
+    buttons: Union[ui.button, list],
+    func,
+    *args,
+    shared_state: Optional[Any] = None,
+    label: str = 'Processing…',
+    **kwargs,
+):
+    """
+    Async wrapper for GUI operations that run in a thread executor.
+
+    While func is executing:
+      - Each button in `buttons` gets the Quasar 'loading' prop and is disabled.
+      - If shared_state is provided, TASK_GUI_OP is set to running=True so the
+        header spinner activates for all connected browser tabs.
+
+    After func returns (or raises):
+      - Button state is restored.
+      - TASK_GUI_OP is reset to running=False.
+
+    Args:
+        buttons:      A single ui.button or a list of ui.button instances.
+        func:         A plain (non-async) callable to execute in the thread pool.
+        *args:        Positional arguments forwarded to func.
+        shared_state: Optional Manager dict; when provided the global spinner
+                      is shown on all tabs during the operation.
+        label:        Status text for the header while the operation runs.
+                      Defaults to 'Processing…'.
+        **kwargs:     Keyword arguments forwarded to func.
+
+    Returns:
+        The return value of func(*args, **kwargs).
+    """
+    if isinstance(buttons, ui.button):
+        buttons = [buttons]
+
+    # --- enter loading state ---
+    for btn in buttons:
+        btn.props('loading')
+        btn.disable()
+
+    if shared_state is not None:
+        set_task_running(shared_state, TASK_GUI_OP, True, label)
+
+    # --- run in executor ---
+    result = None
+    try:
+        result = await run.io_bound(func, *args, **kwargs)
+    finally:
+        # --- restore button state ---
+        for btn in buttons:
+            btn.props(remove='loading')
+            btn.enable()
+
+        if shared_state is not None:
+            set_task_running(shared_state, TASK_GUI_OP, False, '')
+
+    return result
+=== /workspace/source/birdnet_copter/tts.py ===
 """
 Text-to-Speech generation for detection announcements.
 Uses Microsoft Edge TTS (edge-tts).
@@ -10186,7 +10227,7 @@ def test_tts():
 
 
 if __name__ == "__main__":
-    test_tts()=== ./source/birdnet_copter/utils.py ===
+    test_tts()=== /workspace/source/birdnet_copter/utils.py ===
 """
 Shared utility functions for Streamlit pages.
 """

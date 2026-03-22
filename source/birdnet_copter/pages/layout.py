@@ -46,17 +46,20 @@ def _relative_db_label(app_state: AppState) -> str:
             return f"{app_state.global_index_path} (global)"
         return "– (global)"
 
-    if app_state.active_db is None:
-        return '–'
+    db = app_state.active_db
+    if db is None or not db.exists():
+        return '⚠️ No DB selected'
 
-    db_folder = app_state.active_db.parent
     try:
-        rel = db_folder.relative_to(app_state.root_path)
-        if str(rel) == '.':
-            return f"../{app_state.root_path.name}"
-        return f"./{rel}"
-    except ValueError:
-        return str(db_folder)
+        import sqlite3
+        conn = sqlite3.connect(db)
+        count = conn.execute("SELECT COUNT(*) FROM source_dbs").fetchone()[0]
+        conn.close()
+        if count == 0:
+            return '⚠️ No DB selected'
+        return f'{count} DB{"s" if count != 1 else ""} loaded'
+    except Exception:
+        return '⚠️ No DB selected'
 
 
 # ---------------------------------------------------------------------------

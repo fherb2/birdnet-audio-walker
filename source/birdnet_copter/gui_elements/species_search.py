@@ -19,6 +19,7 @@ Usage:
 from pathlib import Path
 from typing import Callable, Optional
 
+from loguru import logger
 from nicegui import ui
 
 from ..db_queries import search_species_in_list
@@ -52,6 +53,9 @@ class SpeciesSearch:
         self._input: Optional[ui.input] = None
         self._active_label: Optional[ui.label] = None
         self._container: Optional[ui.element] = None
+        
+        logger.debug(f"SpeciesSearch.__init__: db={db_path}, labels={'yes' if labels else 'no'}")
+        self._render(placeholder)
 
     # ------------------------------------------------------------------
     # Public API
@@ -103,15 +107,9 @@ class SpeciesSearch:
                 # Dropdown menu anchored below the input
                 self._menu = ui.menu().props('no-parent-event no-focus').classes('w-64')
 
-            self._input.on(
-                'keyup',
-                lambda: self._on_keyup(),
-            )
-            # Also trigger on input event to catch paste / clear
-            self._input.on(
-                'input',
-                lambda: self._on_keyup(),
-            )
+            # 
+            self._input.on('keyup', lambda _: self._on_keyup())
+            self._input.on('update:modelValue', lambda _: self._on_keyup())
 
         # Set initial state
         if self._value:

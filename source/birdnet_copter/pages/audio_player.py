@@ -38,7 +38,7 @@ from ..db_queries import (
 from ..bird_language import load_labels
 from ..filters import DetectionFilter
 from ..player import AudioPlayer, export_detections, export_detections_mp3
-from ..task_status import set_task_running, TASK_AUDIO_GEN
+from ..task_status import set_task_running, TASK_AUDIO_GEN, JS_TIMEOUT
 
 
 # ---------------------------------------------------------------------------
@@ -53,7 +53,7 @@ def _get_state() -> AppState:
 async def audio_player() -> None:
     state = _get_state()
     create_layout(state)
-
+    
     if state.active_db is None or not state.active_db.exists():
         ui.label('⚠️ No database selected. Please open a database first.') \
             .classes('text-orange-7 q-ma-md')
@@ -83,6 +83,7 @@ async def audio_player() -> None:
                     db_path=state.active_db,
                     on_select=lambda s: setattr(state, 'ap_filter_species', s),
                     initial_value=state.ap_filter_species,
+                    labels=labels,
                 )
 
             def _open_xc():
@@ -776,12 +777,15 @@ async def audio_player() -> None:
 
                 if not first_file_rendered:
                     player_html = _build_player_html(json.dumps([file_entry])).replace('`', '\\`')
-                    with client:
-                        await ui.run_javascript(
-                            f'document.getElementById("c{player_container.id}").innerHTML = `{player_html}`;',
-                            timeout=5.0,
-                        )
-                    player_container.set_visibility(True)
+                    try:
+                        with client:
+                            await ui.run_javascript(
+                                f'document.getElementById("c{player_container.id}").innerHTML = `{player_html}`;',
+                                timeout=JS_TIMEOUT,
+                            )
+                        player_container.set_visibility(True)
+                    except Exception as e:
+                        logger.warning(f"run_javascript (html inject) failed: {e}")
                     try:
                         with client:
                             await ui.run_javascript(
@@ -795,7 +799,7 @@ async def audio_player() -> None:
                                 }}
                                 }})(20);
                                 """,
-                                timeout=5.0,
+                                timeout=JS_TIMEOUT,
                             )
                         logger.info("run_javascript completed OK")
                     except Exception as e:
@@ -804,13 +808,16 @@ async def audio_player() -> None:
 
                 else:
                     entry_json = json.dumps(file_entry)
-                    with client:
-                        await ui.run_javascript(
-                            f'window.pendingAudioFiles = '
-                            f'(window.pendingAudioFiles || []);'
-                            f'window.pendingAudioFiles.push({entry_json});',
-                            timeout=5.0,
-                        )
+                    try:
+                        with client:
+                            await ui.run_javascript(
+                                f'window.pendingAudioFiles = '
+                                f'(window.pendingAudioFiles || []);'
+                                f'window.pendingAudioFiles.push({entry_json});',
+                                timeout=JS_TIMEOUT,
+                            )
+                    except Exception as e:
+                        logger.warning(f"run_javascript (push audio) failed: {e}")
                 # Update progress
                 progress = (i + 1) / n
                 state.audio_generation_progress = progress
@@ -905,22 +912,28 @@ async def audio_player() -> None:
                         })
                 if files:
                     player_html = _build_player_html(json.dumps(files)).replace('`', '\\`')
-                    await ui.run_javascript(
-                        f'document.getElementById("c{player_container.id}").innerHTML = `{player_html}`;',
-                        timeout=5.0,
-                    )
-                    player_container.set_visibility(True)
-                    await ui.run_javascript(
-                        f"""
-                        (function poll(attempts) {{
-                          var a = document.getElementById('bp-audio');
-                          if (a) {{
-                            {_build_player_js(json.dumps(files))}
-                          }} else if (attempts > 0) {{
-                            setTimeout(function() {{ poll(attempts - 1); }}, 100);
-                          }}
-                        }})(20);
-                        """,
-                        timeout=5.0,
-                    )
+                    try:
+                        await ui.run_javascript(
+                            f'document.getElementById("c{player_container.id}").innerHTML = `{player_html}`;',
+                            timeout=JS_TIMEOUT,
+                        )
+                        player_container.set_visibility(True)
+                    except Exception as e:
+                        logger.warning(f"run_javascript (cache html inject) failed: {e}")
+                    try:
+                        await ui.run_javascript(
+                            f"""
+                            (function poll(attempts) {{
+                              var a = document.getElementById('bp-audio');
+                              if (a) {{
+                                {_build_player_js(json.dumps(files))}
+                              }} else if (attempts > 0) {{
+                                setTimeout(function() {{ poll(attempts - 1); }}, 100);
+                              }}
+                            }})(20);
+                            """,
+                            timeout=JS_TIMEOUT,
+                        )
+                    except Exception as e:
+                        logger.warning(f"run_javascript (cache player js) failed: {e}")
                     
