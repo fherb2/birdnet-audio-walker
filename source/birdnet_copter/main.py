@@ -15,6 +15,7 @@ Usage:
 import argparse
 import multiprocessing
 import signal
+import asyncio
 import sys
 from pathlib import Path
 
@@ -23,33 +24,69 @@ from nicegui import app, ui
 
 from .app_state import AppState
 from .hardware import detect_hardware
+import atexit
+import multiprocessing
+
 from .job_queue import create_queues, shutdown_scouting, QueueBundle
 from .scout_process import run_scout_process
-from .utils import find_databases_recursive
-from .db_queries import create_species_list_table
+from .temp_db_init import create_temp_db
+from .temp_db_process import run_temp_db_process
+from .bird_language import load_labels
 from .scout_watchdog import run_watchdog
 
+
+def _ensure_birdnet_model() -> None:
+    """
+    Load BirdNET model once to trigger download if not yet present.
+    This also ensures label files are available for bird_language.load_labels().
+    The loaded model is not retained here – scout_process loads it independently.
+    """
+    try:
+        import birdnet
+        birdnet.load("acoustic", "2.4", "pb")
+        logger.info("BirdNET model available")
+    except Exception as e:
+        logger.warning(f"BirdNET model preload failed: {e}")
 
 # ---------------------------------------------------------------------------
 # Startup tasks (run once after uvicorn is up)
 # ---------------------------------------------------------------------------
-
-async def _startup_tasks(app_state: AppState) -> None:
+async def _startup_tasks(app_state: AppState, bundle: QueueBundle) -> None:
     """
-    Scan root_path for databases and set the first one as active.
-    Loads language_code from the active database.
+    Create temp_db, start temp_db_process, register atexit cleanup.
+    No source DB is pre-selected – source_dbs table starts empty.
     """
-    logger.info(f"Scanning for databases in: {app_state.root_path}")
-    app_state.available_dbs = find_databases_recursive(app_state.root_path)
+    # Ensure BirdNET model (and label files) are downloaded before first use
+    logger.info("Ensuring BirdNET model is available…")
+    await asyncio.get_event_loop().run_in_executor(None, _ensure_birdnet_model)
 
-    if not app_state.available_dbs:
-        logger.warning("No birdnet_analysis.db files found in root path")
-        return
+    labels = load_labels(app_state.bird_language_code)
+    temp_db_path = create_temp_db(labels)
+    app_state.active_db = temp_db_path
+    logger.info(f"temp_db created at: {temp_db_path}")
 
-    app_state.active_db = app_state.available_dbs[0]
-    logger.info(f"Active database: {app_state.active_db}")
-    # Bird language stays at default 'de' – configurable via Hangar
-    logger.info(f"Bird language: {app_state.bird_language_code}")
+    # Register cleanup so the tempfile is deleted on normal exit
+    atexit.register(_cleanup_temp_db, temp_db_path)
+
+    # Start temp_db_process
+    p = multiprocessing.Process(
+        target=run_temp_db_process,
+        args=(str(temp_db_path), bundle.temp_db_queue, bundle.shared_state),
+        name="temp_db_process",
+        daemon=False,
+    )
+    p.start()
+    app.state.temp_db_process = p
+    logger.info(f"TempDbProcess started (pid={p.pid})")
+
+
+def _cleanup_temp_db(temp_db_path) -> None:
+    """Delete the temp DB file on server exit."""
+    try:
+        temp_db_path.unlink(missing_ok=True)
+        logger.info(f"temp_db deleted: {temp_db_path}")
+    except Exception as e:
+        logger.warning(f"Could not delete temp_db: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -167,6 +204,13 @@ def main() -> int:
             if wp.is_alive():
                 logger.warning("Scout process did not exit cleanly, terminating")
                 wp.terminate()
+        bundle.temp_db_queue.put({'op': 'shutdown'})
+        tp = getattr(app.state, 'temp_db_process', None)
+        if tp is not None:
+            tp.join(timeout=5.0)
+            if tp.is_alive():
+                logger.warning("TempDbProcess did not exit cleanly, terminating")
+                tp.terminate()
         sys.exit(0)
 
     signal.signal(signal.SIGTERM, _signal_handler)
@@ -176,10 +220,8 @@ def main() -> int:
     app.state.app_state = app_state
     app.state.bundle    = bundle
 
-    import asyncio
-
     async def _on_startup():
-        asyncio.create_task(_startup_tasks(app_state))
+        asyncio.create_task(_startup_tasks(app_state, bundle))
         asyncio.create_task(
             run_watchdog(
                 app_state=app_state,
@@ -206,6 +248,14 @@ def main() -> int:
         if wp.is_alive():
             logger.warning("Scout process did not exit cleanly, terminating")
             wp.terminate()
+
+    bundle.temp_db_queue.put({'op': 'shutdown'})
+    tp = getattr(app.state, 'temp_db_process', None)
+    if tp is not None:
+        tp.join(timeout=5.0)
+        if tp.is_alive():
+            logger.warning("TempDbProcess did not exit cleanly, terminating")
+            tp.terminate()
 
     manager.shutdown()
     logger.success("birdnet-copter stopped")

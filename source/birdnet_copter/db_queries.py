@@ -335,6 +335,7 @@ def get_detection_by_id(
                 d.timezone,
                 d.scientific_name,
                 d.confidence,
+                s.db_path as source_db_path,
                 m.timestamp_utc as file_timestamp_utc,
                 m.timestamp_local as file_timestamp_local,
                 m.duration_seconds as file_duration_seconds,
@@ -344,6 +345,8 @@ def get_detection_by_id(
                 m.channels
             FROM detections d
             JOIN metadata m ON d.filename = m.filename
+                           AND d.source_db_id = m.source_db_id
+            LEFT JOIN source_dbs s ON d.source_db_id = s.id
             WHERE d.id = ?
         """, (detection_id,))
 
@@ -427,6 +430,7 @@ def query_detections(
                 d.timezone,
                 d.scientific_name,
                 d.confidence,
+                s.db_path as source_db_path,
                 m.timestamp_utc as file_timestamp_utc,
                 m.timestamp_local as file_timestamp_local,
                 m.duration_seconds as file_duration_seconds,
@@ -436,6 +440,8 @@ def query_detections(
                 m.channels
             FROM detections d
             JOIN metadata m ON d.filename = m.filename
+                           AND d.source_db_id = m.source_db_id
+            LEFT JOIN source_dbs s ON d.source_db_id = s.id
             WHERE 1=1
         """
         params = []

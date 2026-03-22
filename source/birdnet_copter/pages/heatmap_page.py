@@ -29,7 +29,7 @@ from ..gui_elements.species_search import SpeciesSearch
 from ..player import AudioPlayer
 from ..db_queries import query_detections, get_recording_date_range
 from ..bird_language import load_labels
-from ..task_status import run_with_loading
+from ..task_status import run_with_loading, JS_TIMEOUT
 
 import uuid
 from nicegui import app as _nicegui_app
@@ -691,7 +691,7 @@ async def _open_click_dialog(
                             limit=DIALOG_MAX_DETECTIONS,
                             sort_by="confidence",
                             sort_order="desc",
-                            labels=labels,
+                            labels=load_labels(state.bird_language_code),
                         ),
                     )
                     
@@ -759,7 +759,7 @@ async def _open_click_dialog(
 
                     await ui.run_javascript(
                         _build_dialog_player_js(session_id, container_id),
-                        timeout=5.0,
+                        timeout=JS_TIMEOUT,
                     )
                         
     except Exception as exc:

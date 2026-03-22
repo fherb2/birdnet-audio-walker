@@ -24,6 +24,11 @@ TASK_AUDIO_GEN      = 'audio_gen'
 TASK_GUI_OP         = 'gui_op'
 TASK_EMBEDDING_SYNC = 'embedding_sync'
 TASK_GLOBAL_SYNC    = 'global_sync'
+TASK_TEMP_DB        = 'temp_db'
+
+# Timeout for ui.run_javascript calls (seconds).
+# Audio generation can take longer than the default 5s.
+JS_TIMEOUT = 30.0
 
 ALL_TASK_KEYS = [
     TASK_SCOUT,
@@ -31,6 +36,7 @@ ALL_TASK_KEYS = [
     TASK_GUI_OP,
     TASK_EMBEDDING_SYNC,
     TASK_GLOBAL_SYNC,
+    TASK_TEMP_DB,
 ]
 
 

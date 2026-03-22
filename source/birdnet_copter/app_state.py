@@ -27,7 +27,6 @@ class AppState:
     # ------------------------------------------------------------------
     root_path: Path
     read_only: bool = False
-    available_dbs: List[Path] = field(default_factory=list)
     active_db: Optional[Path] = None
     # Bird name language (fully implemented)
     bird_language_code: str = 'de'

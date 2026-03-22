@@ -77,11 +77,13 @@ class QueueBundle:
         job_queue:      Main → Scout    ScanJob objects (or SIGNAL_SHUTDOWN)
         progress_queue: Scout → Main    progress dicts (see _progress_msg())
         control_queue:  Main → Scout    SIGNAL_WAIT / SIGNAL_RESUME / SIGNAL_STOP
+        temp_db_queue:  Main → TempDbProcess
         shared_state:   multiprocessing.Manager().dict()  readable by GUI
     """
     job_queue:      Queue
     progress_queue: Queue
     control_queue:  Queue
+    temp_db_queue:  Queue
     shared_state:   dict   # Manager().dict() – passed in from main.py
 
 
@@ -102,6 +104,7 @@ def create_queues(shared_state: dict) -> QueueBundle:
         job_queue=Queue(),
         progress_queue=Queue(),
         control_queue=Queue(),
+        temp_db_queue=Queue(),
         shared_state=shared_state,
     )
     logger.debug("Queue bundle created")

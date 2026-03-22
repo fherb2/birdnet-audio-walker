@@ -20,9 +20,7 @@ from ..pages.layout import create_layout
 from ..gui_elements.page_header import page_header
 from ..gui_elements.section_card import section_card
 from ..gui_elements.folder_tree import FolderTree
-from ..utils import find_databases_recursive
 from ..bird_language import get_available_languages
-from ..task_status import run_with_loading
 
 
 # ---------------------------------------------------------------------------
@@ -115,15 +113,6 @@ async def hangar() -> None:
                         return
                     state.root_path = new_root
                     root_label.set_text(str(new_root))
-                    dbs = await run_with_loading(
-                        root_dialog_btn,
-                        find_databases_recursive,
-                        new_root,
-                        shared_state=state.shared_state,
-                        label='Scanning folders…',
-                    )
-                    state.available_dbs = dbs
-                    state.active_db = dbs[0] if dbs else None
                     logger.info(f'Root path changed to: {new_root}')
                     root_dialog.close()
 
@@ -225,8 +214,9 @@ async def hangar() -> None:
             # --- Bird name language (fully active) ---
             with ui.column().classes('gap-1'):
                 ui.label('Bird Name Language').classes('text-caption text-grey-6 font-bold')
+                available_langs = get_available_languages()
                 bird_lang_select = ui.select(
-                    options=get_available_languages(),
+                    options=available_langs if available_langs else [state.bird_language_code],
                     value=state.bird_language_code,
                     label='Bird Name Language',
                     on_change=lambda e: _on_bird_lang_change(e.value),
@@ -252,6 +242,16 @@ async def hangar() -> None:
             )
             state.bird_language_code = 'de'
             bird_lang_select.set_value('de')
+            lang = 'de'
         else:
             state.bird_language_code = lang
             logger.info(f"Bird language changed to: {lang}")
+
+        # Notify temp_db_process to reload local_names
+        from ..bird_language import load_labels as _load_labels
+        bundle = nicegui_app.state.bundle
+        bundle.temp_db_queue.put({
+            'op':            'reload_labels',
+            'language_code': lang,
+            'labels':        _load_labels(lang),
+        })

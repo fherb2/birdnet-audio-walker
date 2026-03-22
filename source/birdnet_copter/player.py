@@ -99,7 +99,8 @@ class AudioPlayer:
         pause = self._generate_silence(1.0, 48000)
         
         # 2. Extract audio snippet with PM buffer
-        wav_path = self.db_dir / detection['filename']
+        src = detection.get('source_db_path')
+        wav_path = (Path(src).parent if src else self.db_dir) / detection['filename']
         
         try:
             start_offset, end_offset = calculate_snippet_offsets(detection, self.pm_seconds)
@@ -495,7 +496,8 @@ class AudioPlayer:
         pause = self._generate_silence(1.0, 48000)
         
         # 2. Extract audio snippet with PM buffer
-        wav_path = self.db_dir / detection['filename']
+        src = detection.get('source_db_path')
+        wav_path = (Path(src).parent if src else self.db_path.parent) / detection['filename']
         
         try:
             start_offset, end_offset = calculate_snippet_offsets(detection, self.pm_seconds)
@@ -586,7 +588,8 @@ class AudioPlayer:
         start_offset, end_offset = calculate_snippet_offsets(detection, pm_seconds)
         
         # Get WAV path
-        wav_path = self.db_path.parent / detection['filename']
+        src = detection.get('source_db_path')
+        wav_path = (Path(src).parent if src else self.db_path.parent) / detection['filename']
         
         if not wav_path.exists():
             raise FileNotFoundError(f"WAV file not found: {wav_path}")
