@@ -6,7 +6,7 @@ Jede Aufnahme ist ein Ereignis in Raum und Zeit. Die einzige physikalisch eindeu
 
 Politische Zeitzonen, Sommerzeit-Regelungen und biologische Solarzeit sind dagegen Interpretationen dieses Grunddatums. Sie hängen von Konventionen ab, die sich ändern können, und von Fragestellungen, die je nach Nutzer unterschiedlich sind. Deshalb werden sie nicht in der Datenbank gespeichert, sondern zur Laufzeit aus UTC und GPS berechnet.
 
-Konkret bedeutet das: Die `metadata`-Tabelle enthält für jedes Audiofile genau einen Raum-Zeit-Anker – den UTC-Zeitstempel des Aufnahmebeginns und die GPS-Koordinaten des Aufnahmeorts. Jede Erkennung in der `detections`-Tabelle ist über einen Zeitoffset relativ zu diesem Anker präzise in Raum und Zeit verortet. Die genaue technische Ausgestaltung dieser Offsets – ob als Sekundenwert, als Samplezahl oder als vollständig berechneter UTC-Zeitstempel – ist noch abschließend zu entscheiden. Entscheidend ist, dass jedes Schnipsel auf den Bruchteil einer Sekunde genau in Raum und Zeit rekonstruierbar bleibt.
+Konkret bedeutet das: Die `metadata`-Tabelle enthält für jedes Audiofile genau einen Raum-Zeit-Anker – den UTC-Zeitstempel des Aufnahmebeginns und die GPS-Koordinaten des Aufnahmeorts. Jede Erkennung in der `detections`-Tabelle ist über einen Zeitoffset relativ zu diesem Anker präzise in Raum und Zeit und Zeitdauer verortet. Die genaue technische Ausgestaltung dieser Offsets – ob als Sekundenwert, als Samplezahl oder als vollständig berechneter absoluter UTC-Zeitstempel – ist noch abschließend zu entscheiden. Entscheidend ist, dass jedes Schnipsel auf den Bruchteil einer Sekunde genau in Raum und Zeit rekonstruierbar bleibt.
 
 ---
 
