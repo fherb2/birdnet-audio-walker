@@ -50,14 +50,27 @@ def _relative_db_label(app_state: AppState) -> str:
     if db is None or not db.exists():
         return '⚠️ No DB selected'
 
+    # If temp_db_process is currently running, don't read yet
+    try:
+        tasks = app_state.shared_state.get('tasks', {}) if app_state.shared_state else {}
+        if tasks.get('temp_db', {}).get('running', False):
+            return '⏳ Loading…'
+    except Exception:
+        pass
+
     try:
         import sqlite3
         conn = sqlite3.connect(db)
         count = conn.execute("SELECT COUNT(*) FROM source_dbs").fetchone()[0]
+        if count == 1:
+            row = conn.execute("SELECT display_name FROM source_dbs LIMIT 1").fetchone()
+            name = row[0] if row else '?'
+            conn.close()
+            return f'Single DB {name} loaded'
         conn.close()
         if count == 0:
             return '⚠️ No DB selected'
-        return f'{count} DB{"s" if count != 1 else ""} loaded'
+        return f'{count} DBs loaded'
     except Exception:
         return '⚠️ No DB selected'
 
@@ -93,16 +106,18 @@ def create_layout(app_state: AppState) -> ui.left_drawer:
         ui.separator()
 
         nav_items = [
-            ('Hangar',            '/'),
-            ('Scouting Flight',   '/scouting'),
-            ('Exploration Area',  '/exploration'),
-            ('Audio Player',      '/audio-player'),
-            ('Date-Time-Map',     '/heatmap'),
+            ('🛠',  'Hangar',            '/'),
+            ('🚁',  'Scouting Flight',   '/scouting'),
+            ('🗺',  'Exploration Area',  '/exploration'),
+            ('🎧',  'Audio Player',      '/audio-player'),
+            ('🕐',  'Date-Time-Map',     '/heatmap'),
         ]
 
-        for label, path in nav_items:
-            ui.item(label, on_click=lambda p=path: ui.navigate.to(p)) \
-                .classes('cursor-pointer rounded hover:bg-grey-3 q-py-xs')
+        for icon, label, path in nav_items:
+            ui.item(
+                f'{icon}  {label}',
+                on_click=lambda p=path: ui.navigate.to(p),
+            ).classes('cursor-pointer rounded hover:bg-grey-3 q-py-xs')
 
     # ------------------------------------------------------------------
     # GPU error dialog (created before header so the button can ref it)

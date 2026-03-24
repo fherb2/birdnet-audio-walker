@@ -59,10 +59,10 @@ def run_temp_db_process(
             break
 
         if op == 'add':
-            _handle_add(temp_db_path, msg['db_path'], shared_state)
+            _handle_add(temp_db_path, msg['db_path'], shared_state, queue)
 
         elif op == 'remove':
-            _handle_remove(temp_db_path, msg['db_path'], shared_state)
+            _handle_remove(temp_db_path, msg['db_path'], shared_state, queue)
 
         elif op == 'reload_labels':
             _handle_reload_labels(temp_db_path, msg['labels'], shared_state)
@@ -78,7 +78,7 @@ def run_temp_db_process(
 # Operation handlers
 # ---------------------------------------------------------------------------
 
-def _handle_add(temp_db_path: str, src_db_path: str, shared_state: dict) -> None:
+def _handle_add(temp_db_path: str, src_db_path: str, shared_state: dict, queue=None) -> None:
     """
     Add a source database to the temp_db.
 
@@ -98,7 +98,9 @@ def _handle_add(temp_db_path: str, src_db_path: str, shared_state: dict) -> None
         src_conn.row_factory = sqlite3.Row
         temp_conn = sqlite3.connect(temp_db_path)
         temp_conn.execute("PRAGMA journal_mode=WAL")
-
+        temp_conn.execute("PRAGMA synchronous=OFF")
+        temp_conn.execute("PRAGMA cache_size=-64000")
+        
         try:
             # 1. Register source DB
             added_at = datetime.now(timezone.utc).isoformat()
@@ -118,83 +120,66 @@ def _handle_add(temp_db_path: str, src_db_path: str, shared_state: dict) -> None
                 (min_conf, source_db_id),
             )
 
-            # 3. Copy metadata rows
-            meta_rows = src_conn.execute(
-                """
-                SELECT filename, timestamp_utc, timestamp_local, timezone,
-                       serial, gps_lat, gps_lon, sample_rate, channels,
-                       bit_depth, duration_seconds, temperature_c,
-                       battery_voltage, gain, firmware
-                FROM metadata
-                """
-            ).fetchall()
+            # Close src_conn before ATTACH to avoid lock conflict
+            src_conn.close()
+            src_conn = None
 
-            temp_conn.executemany(
-                """
+            # 3+4. Copy via ATTACH
+            temp_conn.execute("ATTACH DATABASE ? AS src", (src_db_path,))
+            temp_conn.execute(f"""
                 INSERT OR IGNORE INTO metadata
                     (filename, source_db_id, timestamp_utc, timestamp_local,
                      timezone, serial, gps_lat, gps_lon, sample_rate, channels,
                      bit_depth, duration_seconds, temperature_c, battery_voltage,
                      gain, firmware)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                [
-                    (
-                        r['filename'], source_db_id,
-                        r['timestamp_utc'], r['timestamp_local'], r['timezone'],
-                        r['serial'], r['gps_lat'], r['gps_lon'],
-                        r['sample_rate'], r['channels'], r['bit_depth'],
-                        r['duration_seconds'], r['temperature_c'],
-                        r['battery_voltage'], r['gain'], r['firmware'],
-                    )
-                    for r in meta_rows
-                ],
-            )
-            logger.debug(f"TempDbProcess: copied {len(meta_rows)} metadata rows")
+                SELECT filename, {source_db_id},
+                       timestamp_utc, timestamp_local, timezone, serial,
+                       gps_lat, gps_lon, sample_rate, channels, bit_depth,
+                       duration_seconds, temperature_c, battery_voltage,
+                       gain, firmware
+                FROM src.metadata
+            """)
+            meta_count = temp_conn.execute("SELECT changes()").fetchone()[0]
+            logger.debug(f"TempDbProcess: copied {meta_count} metadata rows")
 
-            # 4. Copy detections rows
-            det_rows = src_conn.execute(
-                """
-                SELECT filename, segment_start_utc, segment_start_local,
-                       segment_end_utc, segment_end_local, timezone,
-                       scientific_name, confidence
-                FROM detections
-                """
-            ).fetchall()
+            # Drop indices before bulk insert
+            temp_conn.execute("DROP INDEX IF EXISTS idx_detections_species")
+            temp_conn.execute("DROP INDEX IF EXISTS idx_detections_segment_start")
+            temp_conn.execute("DROP INDEX IF EXISTS idx_detections_source")
 
-            temp_conn.executemany(
-                """
+            temp_conn.execute(f"""
                 INSERT INTO detections
                     (filename, source_db_id, segment_start_utc, segment_start_local,
                      segment_end_utc, segment_end_local, timezone,
                      scientific_name, confidence)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                [
-                    (
-                        r['filename'], source_db_id,
-                        r['segment_start_utc'], r['segment_start_local'],
-                        r['segment_end_utc'], r['segment_end_local'],
-                        r['timezone'], r['scientific_name'], r['confidence'],
-                    )
-                    for r in det_rows
-                ],
-            )
-            logger.debug(f"TempDbProcess: copied {len(det_rows)} detection rows")
-
+                SELECT filename, {source_db_id},
+                       segment_start_utc, segment_start_local,
+                       segment_end_utc, segment_end_local, timezone,
+                       scientific_name, confidence
+                FROM src.detections
+            """)
+            det_count = temp_conn.execute("SELECT changes()").fetchone()[0]
+            logger.debug(f"TempDbProcess: copied {det_count} detection rows")
             temp_conn.commit()
+            temp_conn.execute("DETACH DATABASE src")
 
-            # 5. Rebuild species_list
-            _rebuild_species_list(temp_conn)
-            temp_conn.commit()
-
+            # Recreate indices and rebuild species_list only if queue is empty
+            if queue is None or queue.empty():
+                temp_conn.execute("CREATE INDEX IF NOT EXISTS idx_detections_species ON detections(scientific_name)")
+                temp_conn.execute("CREATE INDEX IF NOT EXISTS idx_detections_segment_start ON detections(segment_start_local)")
+                temp_conn.execute("CREATE INDEX IF NOT EXISTS idx_detections_source ON detections(source_db_id)")
+                temp_conn.commit()
+                _rebuild_species_list(temp_conn)
+                temp_conn.commit()
+                
             logger.info(
                 f"TempDbProcess: added {display_name} "
-                f"({len(meta_rows)} files, {len(det_rows)} detections)"
+                f"({meta_count} files, {det_count} detections)"
             )
 
         finally:
-            src_conn.close()
+            if src_conn is not None:
+                src_conn.close()
             temp_conn.close()
 
     except Exception as e:
@@ -203,7 +188,7 @@ def _handle_add(temp_db_path: str, src_db_path: str, shared_state: dict) -> None
     set_task_running(shared_state, TASK_TEMP_DB, False, '')
 
 
-def _handle_remove(temp_db_path: str, src_db_path: str, shared_state: dict) -> None:
+def _handle_remove(temp_db_path: str, src_db_path: str, shared_state: dict, queue=None) -> None:
     """
     Remove a source database from the temp_db.
 
@@ -221,6 +206,8 @@ def _handle_remove(temp_db_path: str, src_db_path: str, shared_state: dict) -> N
     try:
         conn = sqlite3.connect(temp_db_path)
         conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=OFF")
+        conn.execute("PRAGMA cache_size=-64000")
 
         try:
             row = conn.execute(
@@ -247,8 +234,9 @@ def _handle_remove(temp_db_path: str, src_db_path: str, shared_state: dict) -> N
             )
             conn.commit()
 
-            _rebuild_species_list(conn)
-            conn.commit()
+            if queue is None or queue.empty():
+                _rebuild_species_list(conn)
+                conn.commit()
 
             logger.info(f"TempDbProcess: removed {display_name}")
 

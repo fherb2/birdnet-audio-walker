@@ -294,7 +294,7 @@ def build_echart_options(
 async def heatmap_page() -> None:
     state = _get_state()
     create_layout(state)
-    page_header('🌡', 'Date-Time-Map', 'heatmap')
+    page_header('🕐', 'Date-Time-Map', 'heatmap')
 
     if state.active_db is None or not state.active_db.exists():
         ui.label("⚠️ No database selected. Please open a database first.") \
@@ -505,7 +505,7 @@ async def heatmap_page() -> None:
     # ------------------------------------------------------------------
     # Chart container + Download
     # ------------------------------------------------------------------
-    with section_card('🗺', 'Heatmap', 'heatmap_chart'):
+    with section_card('🕐 x 📅', 'Diel Activity Map', 'heatmap_chart'):
         chart_container = ui.column().classes("w-full q-mt-md overflow-auto")
 
         if state.hm_filters_applied and state.hm_aggregated_data:

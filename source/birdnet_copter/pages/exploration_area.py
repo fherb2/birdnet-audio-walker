@@ -91,6 +91,7 @@ async def exploration_area() -> None:
             xc_btn.disable()
             sidebar.hide()
 
+
     # -----------------------------------------------------------------------
     # Section 1: DB selection via DbFolderTree
     # -----------------------------------------------------------------------
@@ -121,6 +122,8 @@ async def exploration_area() -> None:
                 _pending['added'].add(p)
 
             _refresh_no_db_warning(selected)
+            if page.get('update_single_db'):
+                page['update_single_db'](selected)
 
         def _refresh_no_db_warning(selected: Set[Path]) -> None:
             no_db_warning.set_visibility(len(selected) == 0)
@@ -131,12 +134,13 @@ async def exploration_area() -> None:
             preselected=_get_loaded_db_paths(state.active_db),
         )
         # Set initial warning visibility based on current temp_db state
-        _refresh_no_db_warning(_get_loaded_db_paths(state.active_db))
+        _initial_selected = _get_loaded_db_paths(state.active_db)
+        _refresh_no_db_warning(_initial_selected)
 
     # -----------------------------------------------------------------------
     # Section 2: Aggregate stats
     # -----------------------------------------------------------------------
-    with section_card('📊', 'Database Overview', 'exploration_db_overview'):
+    with section_card('📊', 'Summary of Selected Databases', 'exploration_db_overview'):
 
         with ui.row().classes('gap-6 items-start flex-wrap') as stats_row:
             metric_dbs         = ui.column()
@@ -198,17 +202,60 @@ async def exploration_area() -> None:
         ui.timer(2.0, _check_temp_db_running)
 
     # -----------------------------------------------------------------------
-    # Section 3: Notes (disabled – single-DB management not yet implemented)
+    # Section 3: Single Database Editing
     # -----------------------------------------------------------------------
-    with section_card('📝', 'Notes', 'exploration_notes'):
-        ui.label(
-            'Notes are temporarily disabled. '
-            'Single-database management will be available in a future release.'
-        ).classes('text-caption text-grey-6')
-        ui.textarea(
-            label='Database notes / comments',
-            placeholder='Not available in aggregated view.',
-        ).classes('w-full').props('rows=4 outlined readonly disable')
+    single_db_state = {'expanded': False, 'folder_name': None}
+
+    with ui.card().classes('w-full q-mb-md'):
+        with ui.row().classes('w-full items-center justify-between'):
+            with ui.row().classes('items-center gap-2'):
+                ui.icon('storage').classes('text-h6')
+                single_db_title = ui.label('Single Database Editing') \
+                    .classes('text-h6')
+            single_db_hint = ui.label(
+                '– Please select exactly one database to edit.'
+            ).classes('text-body2 text-grey-6')
+            single_db_toggle = ui.button(
+                icon='expand_more',
+            ).props('flat dense round').classes('text-xl').style('font-size: 1.5rem;')
+            single_db_toggle.disable()
+
+        with ui.column().classes('w-full q-mt-sm') as single_db_content:
+            single_db_content.set_visibility(False)
+            notes_area = ui.textarea(
+                label='Database notes / comments',
+                placeholder='Add notes about this recording session…',
+            ).classes('w-full').props('rows=6 outlined')
+            if state.read_only:
+                notes_area.props('readonly')
+
+    def _toggle_single_db():
+        single_db_state['expanded'] = not single_db_state['expanded']
+        single_db_content.set_visibility(single_db_state['expanded'])
+        single_db_toggle.props(
+            'icon=expand_less' if single_db_state['expanded'] else 'icon=expand_more'
+        )
+
+    single_db_toggle.on('click', lambda: _toggle_single_db())
+
+    def _update_single_db_section(selected: Set[Path]) -> None:
+        if len(selected) == 1:
+            folder_name = next(iter(selected)).name
+            single_db_state['folder_name'] = folder_name
+            single_db_title.set_text(f'Single Database Editing – {folder_name}')
+            single_db_hint.set_visibility(False)
+            single_db_toggle.enable()
+        else:
+            single_db_state['folder_name'] = None
+            single_db_title.set_text('Single Database Editing')
+            single_db_hint.set_visibility(True)
+            single_db_toggle.disable()
+            single_db_content.set_visibility(False)
+            single_db_state['expanded'] = False
+            single_db_toggle.props('icon=expand_more')
+            
+    page['update_single_db'] = _update_single_db_section
+
 
     # -----------------------------------------------------------------------
     # Section 4: Recording Files (all files across selected source DBs)

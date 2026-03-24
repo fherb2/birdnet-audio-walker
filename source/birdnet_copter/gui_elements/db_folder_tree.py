@@ -225,7 +225,7 @@ class DbFolderTree:
         # ------------------------------------------------------------------
         # Row
         # ------------------------------------------------------------------
-        with ui.row().classes('items-center gap-0 w-full').style('min-height: 28px'):
+        with ui.row().classes('items-center gap-0 w-full').style('min-height: 20px'):
 
             # --- Indentation with vertical lines ---
             for lvl, anc_is_last in enumerate(ancestor_is_last):
@@ -237,33 +237,38 @@ class DbFolderTree:
                     ui.element('div').style(
                         'width: 20px; flex-shrink: 0;'
                         'border-left: 1px solid #bdbdbd;'
-                        'height: 28px;'
+                        'height: 20px;'
                     )
 
             # --- Connector: horizontal stub from vertical line to content ---
             # This is the elbow/tee at the current node's level
             connector_style = (
-                'width: 20px; flex-shrink: 0; height: 28px;'
+                'width: 20px; flex-shrink: 0; height: 20px;'
                 'border-left: 1px solid #bdbdbd;'
             )
-            if depth > 0 or len(ancestor_is_last) > 0:
-                # Draw the elbow/tee line
-                with ui.element('div').style(connector_style):
-                    # Horizontal part of the elbow
-                    ui.element('div').style(
-                        'width: 20px; height: 14px;'   # top half: vertical only
-                        'border-bottom: 1px solid #bdbdbd;'
-                        + ('' if not is_last else '')   # bottom half depends on is_last
-                    )
-            else:
-                ui.element('div').style('width: 20px; flex-shrink: 0;')
+            with ui.element('div').style(
+                'width: 20px; flex-shrink: 0; height: 20px;'
+                'position: relative;'
+            ):
+                ui.element('div').style(
+                    'position: absolute;'
+                    'left: 0; top: 0;'
+                    f'width: 1px; height: {"10px" if is_last else "20px"};'
+                    'background: #bdbdbd;'
+                )
+                ui.element('div').style(
+                    'position: absolute;'
+                    'left: 0; top: 10px;'
+                    'width: 10px; height: 1px;'
+                    'background: #bdbdbd;'
+                )
 
             # --- Expand / collapse button (only if has children) ---
             if has_children:
                 icon = 'expand_more' if expanded else 'chevron_right'
                 expand_btn = ui.button(icon=icon) \
                     .props('flat dense round size=xs') \
-                    .style('width: 22px; height: 22px; flex-shrink: 0;')
+                    .style('width: 16px; height: 16px; flex-shrink: 0;')
                 # Capture node reference for closure
                 expand_btn.on('click', lambda _n=node: self._toggle_expand(_n))
             else:
@@ -275,14 +280,14 @@ class DbFolderTree:
                 cb = ui.checkbox(
                     value=self._checked.get(node.path, False),
                     on_change=lambda e, _n=node: self._on_checkbox_change(_n, e.value),
-                ).style('flex-shrink: 0;')
+                ).props('dense').style('flex-shrink: 0;')
                 self._checkboxes[node.path] = cb
             else:
                 # Group-only node: show a group checkbox (tri-state visual via indeterminate)
                 cb = ui.checkbox(
                     value=self._all_children_checked(node),
                     on_change=lambda e, _n=node: self._on_group_checkbox_change(_n, e.value),
-                ).style('flex-shrink: 0;')
+                ).props('dense').style('flex-shrink: 0;')
                 self._checkboxes[node.path] = cb
 
             # --- Folder name label ---
@@ -328,10 +333,25 @@ class DbFolderTree:
     # ------------------------------------------------------------------
 
     def _on_checkbox_change(self, node: DbFolderTreeNode, checked: bool) -> None:
-        """Handle check/uncheck of a single DB-folder node."""
+        """Handle check/uncheck of a node.
+        
+        If the node has children and is collapsed, cascade recursively.
+        If the node has children and is expanded, only affect this node.
+        """
         if self._initialising:
             return
-        self._checked[node.path] = checked
+        has_children = not node.is_leaf
+        is_expanded = self._expanded.get(node.path, False)
+        if has_children and not is_expanded:
+            # Collapsed with children → recursive
+            self._set_subtree_checked(node, checked)
+            for path, is_checked in self._checked.items():
+                cb = self._checkboxes.get(path)
+                if cb is not None:
+                    cb.set_value(is_checked)
+        else:
+            # Expanded or leaf → only this node
+            self._checked[node.path] = checked
         self._refresh_group_checkboxes(self._tree_root)
         self._notify_change()
 
