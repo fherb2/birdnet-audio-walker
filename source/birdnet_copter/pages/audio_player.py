@@ -54,6 +54,8 @@ async def audio_player() -> None:
     state = _get_state()
     create_layout(state)
     
+    page_header('🎧', 'Audio Player', 'audio_player')
+    
     if state.active_db is None or not state.active_db.exists():
         ui.label('⚠️ No database selected. Please open a database first.') \
             .classes('text-orange-7 q-ma-md')
