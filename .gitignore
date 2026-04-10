@@ -1,4 +1,6 @@
 tests/test_data/
+tests/test_data_original/
+tests/test_data_working/
 tests/test_results/
 
 

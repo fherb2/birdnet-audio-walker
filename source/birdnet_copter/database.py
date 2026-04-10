@@ -92,6 +92,62 @@ def init_database(db_path: str):
             value TEXT NOT NULL
         )
     """)
+    
+    # db_meta_data: one row per database, session-wide configuration
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS db_meta_data (
+            id              INTEGER PRIMARY KEY CHECK (id = 1),
+            gps_lat         REAL    NOT NULL DEFAULT 90.0,
+            gps_lon         REAL    NOT NULL DEFAULT 0.0,
+            utc_time_method TEXT,
+            time_offset     TEXT    NOT NULL DEFAULT '+00:00:00',
+            notes           TEXT    NOT NULL DEFAULT '',
+            kv_blob         BLOB
+        )
+    """)
+    # Insert the single row if not already present
+    cursor.execute("""
+        INSERT OR IGNORE INTO db_meta_data (id, gps_lat, gps_lon)
+        VALUES (1, 90.0, 0.0)
+    """)
+
+    # utc_methods: registry of all known UTC time extraction methods
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS utc_methods (
+            name        TEXT PRIMARY KEY,
+            description TEXT NOT NULL DEFAULT ''
+        )
+    """)
+    # Populate with currently implemented methods
+    cursor.executemany(
+        "INSERT OR IGNORE INTO utc_methods (name, description) VALUES (?, ?)",
+        [
+            (
+                'GUANO_TIMESTAMP',
+                'UTC timestamp from GUANO chunk (key "Timestamp", suffix Z or explicit UTC). '
+                'Highest reliability – AudioMoth firmware >= 1.4. '
+                'Value is always UTC, no conversion needed.'
+            ),
+            (
+                'ICMT_TIMESTAMP',
+                'UTC timestamp parsed from ICMT free-text comment written by AudioMoth firmware. '
+                'Format: "Recorded at HH:MM:SS DD/MM/YYYY (UTC) by AudioMoth ...". '
+                'Present in firmware >= 1.2, superseded by GUANO in >= 1.4.'
+            ),
+            (
+                'FILENAME_PATTERN',
+                'Datetime extracted from filename via adaptive scoring. '
+                'AudioMoth default pattern: DEVICEID_YYYYMMDD_HHMMSS.WAV. '
+                'Timezone interpretation depends on adaptive UTC conversion algorithm.'
+            ),
+            (
+                'FILESYSTEM_CTIME',
+                'File creation timestamp from the operating system. '
+                'Unreliable: overwritten on copy operations on most filesystems. '
+                'Last-resort fallback only. Timezone is host system local time.'
+            ),
+        ]
+    )
 
     conn.commit()
     conn.close()
@@ -457,3 +513,139 @@ def vacuum_database(db_path: str):
         logger.error(f"Error vacuuming database: {e}")
     finally:
         conn.close()
+        
+def get_db_meta_data(db_path: Path) -> Optional[Dict]:
+    """
+    Read the single db_meta_data row.
+
+    Returns:
+        Dict with keys: gps_lat, gps_lon, utc_time_method, time_offset,
+        notes, kv_blob (raw bytes or None).
+        Returns None if table does not exist or row is missing.
+    """
+    conn = get_db_connection(db_path)
+    try:
+        cursor = conn.execute("SELECT * FROM db_meta_data WHERE id = 1")
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    except sqlite3.OperationalError:
+        logger.warning(f"db_meta_data table not found in {db_path}")
+        return None
+    finally:
+        conn.close()
+
+
+def set_db_meta_data(db_path: Path, **kwargs) -> bool:
+    """
+    Update fields in the single db_meta_data row.
+
+    Only the keys passed as kwargs are updated; others remain unchanged.
+    Valid keys: gps_lat, gps_lon, utc_time_method, time_offset, notes, kv_blob.
+
+    kv_blob: pass a Python dict – it will be pickled automatically.
+             Pass None to clear the blob.
+
+    Example:
+        set_db_meta_data(db_path, gps_lat=51.03, gps_lon=14.34)
+        set_db_meta_data(db_path, kv_blob={'serial': '249C...', 'gain': 'High'})
+
+    Returns:
+        True on success, False on error.
+    """
+    import pickle
+
+    valid_keys = {'gps_lat', 'gps_lon', 'utc_time_method',
+                  'time_offset', 'notes', 'kv_blob'}
+    filtered = {k: v for k, v in kwargs.items() if k in valid_keys}
+    if not filtered:
+        logger.warning("set_db_meta_data: no valid keys provided")
+        return False
+
+    # Pickle kv_blob if a dict was passed
+    if 'kv_blob' in filtered and isinstance(filtered['kv_blob'], dict):
+        filtered['kv_blob'] = pickle.dumps(filtered['kv_blob'])
+
+    assignments = ', '.join(f"{k} = ?" for k in filtered)
+    values = list(filtered.values())
+
+    try:
+        conn = get_db_connection(db_path)
+        conn.execute(
+            f"UPDATE db_meta_data SET {assignments} WHERE id = 1",
+            values,
+        )
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"set_db_meta_data failed: {e}")
+        return False
+
+
+def get_kv_blob(db_path: Path) -> Optional[Dict]:
+    """
+    Read and unpickle the kv_blob from db_meta_data.
+
+    Returns:
+        Python dict, or None if blob is empty or unpickling fails.
+    """
+    import pickle
+
+    row = get_db_meta_data(db_path)
+    if not row or not row.get('kv_blob'):
+        return None
+    try:
+        return pickle.loads(row['kv_blob'])
+    except Exception as e:
+        logger.error(f"get_kv_blob: unpickling failed: {e}")
+        return None
+
+
+def get_utc_methods(db_path: Path) -> List[Dict]:
+    """
+    Return all registered UTC time extraction methods.
+
+    Returns:
+        List of dicts with keys: name, description.
+        Empty list if table does not exist.
+    """
+    conn = get_db_connection(db_path)
+    try:
+        cursor = conn.execute(
+            "SELECT name, description FROM utc_methods ORDER BY name"
+        )
+        return [dict(row) for row in cursor.fetchall()]
+    except sqlite3.OperationalError:
+        logger.warning(f"utc_methods table not found in {db_path}")
+        return []
+    finally:
+        conn.close()
+
+
+def add_utc_method(db_path: Path, name: str, description: str) -> bool:
+    """
+    Register a new UTC time extraction method.
+
+    Uses INSERT OR IGNORE so existing methods are never overwritten.
+    To update a description, delete and re-insert manually.
+
+    Args:
+        db_path:     Path to SQLite database
+        name:        Unique method name (e.g. 'GUANO_TIMESTAMP')
+        description: Human-readable description of the method
+
+    Returns:
+        True on success, False on error.
+    """
+    try:
+        conn = get_db_connection(db_path)
+        conn.execute(
+            "INSERT OR IGNORE INTO utc_methods (name, description) VALUES (?, ?)",
+            (name, description),
+        )
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"add_utc_method failed for '{name}': {e}")
+        return False

@@ -41,6 +41,7 @@ nicegui = "^3.8.0"
 psutil = "^6.0.0"
 torch = "^2.10.0"
 nvidia-ml-py = "^13.590.48"
+mutagen = "^1.47.0"
 
 
 [tool.poetry.scripts]
