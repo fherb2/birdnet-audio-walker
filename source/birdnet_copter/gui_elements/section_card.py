@@ -52,7 +52,12 @@ class SectionCard:
 
         # Header row: title left, optional description right
         with ui.row().classes('w-full items-start gap-8 q-mb-xs'):
-            ui.label(f'{self._symbol}  {self._name}').classes('text-h6')
+            with ui.row().classes('items-center gap-2'):
+                if self._symbol.startswith('/static/'):
+                    ui.image(self._symbol).style('width:24px; height:24px;')
+                else:
+                    ui.label(self._symbol).classes('text-h6')
+                ui.label(self._name).classes('text-h6')
             if help_text is not None:
                 with ui.expansion('Description').classes(
                     'text-body2 text-grey-8 q-ma-none q-pa-none'

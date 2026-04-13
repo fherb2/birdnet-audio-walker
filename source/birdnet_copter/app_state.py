@@ -53,6 +53,36 @@ class AppState:
     # ------------------------------------------------------------------
     jobs: List[Dict] = field(default_factory=list)
     walker_status: str = 'idle'   # 'idle'|'running'|'wait_pending'|'waiting'
+    
+    # ------------------------------------------------------------------
+    # DB Configuration page state  (db_file_prep.py)
+    # ------------------------------------------------------------------
+    # Currently selected folder on the DB config page.
+    # Independent of active_db / exploration_area selection.
+    dbprep_folder: Optional[Path] = None
+
+    # Cached result of scan_folder() for the selected folder.
+    # None = not yet scanned. Rebuilt when folder changes or user
+    # clicks "Recreate Table". Persists across page navigation.
+    dbprep_scan_result: Optional[Dict] = None
+
+    # Mode: 'create' if no DB exists in folder, 'edit' if DB exists.
+    # Derived from dbprep_folder on selection, stored for convenience.
+    dbprep_mode: str = 'create'   # 'create' | 'edit'
+    
+    # Stores the user-selected key-value pairs from the metadata table
+    # (Section 2.3) that are to be written into the database kv_blob.
+    # Key: metadata key string, Value: the selected value for that key.
+    # Populated by radio-button selection in _render_metadata_section().
+    # Reset to empty dict when a new folder is selected.
+    dbprep_selected_kv: Dict = field(default_factory=dict)
+
+    # Staged GPS and UTC method – survive page navigation
+    dbprep_pending_gps:    Optional[tuple] = None
+    dbprep_pending_method: Optional[str]   = None
+    dbprep_pending_offset: str             = '+00:00:00'
+    
+    dbprep_page_active: bool = False
 
     # ------------------------------------------------------------------
     # Global DB

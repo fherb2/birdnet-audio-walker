@@ -13,7 +13,6 @@ If neither file exists, the expansion element is not rendered at all.
 """
 
 from pathlib import Path
-
 from nicegui import ui
 
 # ---------------------------------------------------------------------------
@@ -51,8 +50,7 @@ def _load_help_text(help_file: str, lang: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 def page_header(symbol: str, name: str, help_file: str, lang: str = 'de') -> None:
-    """
-    Render a standardised page header row.
+    """Render a standardised page header row.
 
     Layout:
         <symbol>  <name>        [▶ Description]
@@ -71,7 +69,21 @@ def page_header(symbol: str, name: str, help_file: str, lang: str = 'de') -> Non
     help_text = _load_help_text(help_file, lang)
 
     with ui.row().classes('w-full items-start gap-8 q-mt-md q-mb-sm'):
-        ui.label(f'{symbol}  {name}').classes('text-h5')
+        with ui.row().classes('items-center gap-2'):
+            if symbol.startswith('/static/'):
+                import re
+                svg_path = Path(__file__).parent.parent / 'pages' / symbol.lstrip('/')
+                try:
+                    svg_content = svg_path.read_text(encoding='utf-8')
+                    svg_content = re.sub(r'width="[^"]*"', 'width="32"', svg_content)
+                    svg_content = re.sub(r'height="[^"]*"', 'height="36"', svg_content)
+                    svg_content = svg_content.replace('<svg ', '<svg style="display:block;" ', 1)
+                    ui.html(svg_content)
+                except Exception:
+                    ui.label('?').classes('text-h5')
+            else:
+                ui.label(symbol).classes('text-h5')
+            ui.label(name).classes('text-h5')
 
         if help_text is not None:
             with ui.expansion('Description').classes(

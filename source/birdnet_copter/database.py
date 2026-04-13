@@ -23,6 +23,7 @@ SQLite database management for BirdNET Batch Analyzer.
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Optional, Dict, List
 from loguru import logger
 
 
