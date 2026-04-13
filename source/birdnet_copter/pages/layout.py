@@ -41,6 +41,11 @@ _HEADER_SIZES = {
 # ---------------------------------------------------------------------------
 
 def _relative_db_label(app_state: AppState) -> str:
+    if app_state.dbprep_page_active:
+        if app_state.dbprep_folder is not None:
+            return str(app_state.dbprep_folder)
+        return 'Select a folder (DB) to configure / edit!'
+    
     if app_state.active_db_is_global:
         if app_state.global_index_path is not None:
             return f"{app_state.global_index_path} (global)"
@@ -106,18 +111,24 @@ def create_layout(app_state: AppState) -> ui.left_drawer:
         ui.separator()
 
         nav_items = [
-            ('🛠',  'Hangar',            '/'),
-            ('🚁',  'Scouting Flight',   '/scouting'),
-            ('🗺',  'Exploration Area',  '/exploration'),
-            ('🎧',  'Audio Player',      '/audio-player'),
-            ('🕐',  'Date-Time-Map',     '/heatmap'),
-        ]
+        ('🅗',  'Landing Page',         '/'),
+        ('🛠',  'Hangar (Technical Config)', '/hangar'),
+        ('/static/icons/db_icon.svg', 'DB Configuration', '/db-config'),
+        ('🚁',  'Scouting Flight',      '/scouting'),
+        ('🗺',  'Exploration Area',     '/exploration'),
+        ('🎧',  'Audio Player',         '/audio-player'),
+        ('🕐',  'Date-Time-Map',        '/heatmap'),
+    ]
 
         for icon, label, path in nav_items:
-            ui.item(
-                f'{icon}  {label}',
-                on_click=lambda p=path: ui.navigate.to(p),
-            ).classes('cursor-pointer rounded hover:bg-grey-3 q-py-xs')
+            with ui.row().classes(
+                'items-center gap-2 cursor-pointer rounded hover:bg-grey-3 q-py-xs px-2'
+            ).on('click', lambda p=path: ui.navigate.to(p)):
+                if icon.startswith('/static/'):
+                    ui.image(icon).style('width:20px; height:20px;')
+                else:
+                    ui.label(icon)
+                ui.label(label).classes('text-body2')
 
     # ------------------------------------------------------------------
     # GPU error dialog (created before header so the button can ref it)

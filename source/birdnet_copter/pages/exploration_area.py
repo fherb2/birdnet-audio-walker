@@ -27,6 +27,7 @@ from ..pages.layout import create_layout
 from ..gui_elements.page_header import page_header
 from ..gui_elements.section_card import section_card
 from ..gui_elements.db_folder_tree import DbFolderTree
+from ..gui_elements.notes_card import NotesCard
 from ..db_queries import (
     get_species_list_with_counts,
     format_detections_column,
@@ -202,60 +203,26 @@ async def exploration_area() -> None:
         ui.timer(2.0, _check_temp_db_running)
 
     # -----------------------------------------------------------------------
-    # Section 3: Single Database Editing
+    # Section 3: Database Notes (single DB only)
     # -----------------------------------------------------------------------
-    single_db_state = {'expanded': False, 'folder_name': None}
+    notes_container = ui.column().classes('w-full')
 
-    with ui.card().classes('w-full q-mb-md'):
-        with ui.row().classes('w-full items-center justify-between'):
-            with ui.row().classes('items-center gap-2'):
-                ui.icon('storage').classes('text-h6')
-                single_db_title = ui.label('Single Database Editing') \
-                    .classes('text-h6')
-            single_db_hint = ui.label(
-                '– Please select exactly one database to edit.'
-            ).classes('text-body2 text-grey-6')
-            single_db_toggle = ui.button(
-                icon='expand_more',
-            ).props('flat dense round').classes('text-xl').style('font-size: 1.5rem;')
-            single_db_toggle.disable()
-
-        with ui.column().classes('w-full q-mt-sm') as single_db_content:
-            single_db_content.set_visibility(False)
-            notes_area = ui.textarea(
-                label='Database notes / comments',
-                placeholder='Add notes about this recording session…',
-            ).classes('w-full').props('rows=6 outlined')
-            if state.read_only:
-                notes_area.props('readonly')
-
-    def _toggle_single_db():
-        single_db_state['expanded'] = not single_db_state['expanded']
-        single_db_content.set_visibility(single_db_state['expanded'])
-        single_db_toggle.props(
-            'icon=expand_less' if single_db_state['expanded'] else 'icon=expand_more'
-        )
-
-    single_db_toggle.on('click', lambda: _toggle_single_db())
-
-    def _update_single_db_section(selected: Set[Path]) -> None:
+    def _render_notes(selected: Set[Path]) -> None:
+        notes_container.clear()
         if len(selected) == 1:
-            folder_name = next(iter(selected)).name
-            single_db_state['folder_name'] = folder_name
-            single_db_title.set_text(f'Single Database Editing – {folder_name}')
-            single_db_hint.set_visibility(False)
-            single_db_toggle.enable()
-        else:
-            single_db_state['folder_name'] = None
-            single_db_title.set_text('Single Database Editing')
-            single_db_hint.set_visibility(True)
-            single_db_toggle.disable()
-            single_db_content.set_visibility(False)
-            single_db_state['expanded'] = False
-            single_db_toggle.props('icon=expand_more')
-            
-    page['update_single_db'] = _update_single_db_section
+            folder = next(iter(selected))
+            db_p = folder / 'birdnet_analysis.db'
+            if db_p.exists():
+                with notes_container:
+                    NotesCard(
+                        db_path=db_p,
+                        folder_path=folder,
+                        read_only=state.read_only,
+                    )
 
+    page['update_single_db'] = _render_notes
+
+    _render_notes(_initial_selected)
 
     # -----------------------------------------------------------------------
     # Section 4: Recording Files (all files across selected source DBs)

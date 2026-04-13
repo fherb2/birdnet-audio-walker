@@ -31,7 +31,7 @@ def _get_state() -> AppState:
     return nicegui_app.state.app_state  # type: ignore[attr-defined]
 
 
-@ui.page('/')
+@ui.page('/hangar')
 async def hangar() -> None:
     state = _get_state()
     create_layout(state)

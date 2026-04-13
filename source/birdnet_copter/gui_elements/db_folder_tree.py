@@ -120,30 +120,22 @@ class DbFolderTree:
         root_path: Path,
         on_change: Optional[Callable[[Set[Path]], None]] = None,
         preselected: Optional[Set[Path]] = None,
+        single_select: bool = False,
+        on_select: Optional[Callable[[Optional[Path]], None]] = None,
     ) -> None:
-        self._root_path = root_path
-        self._on_change = on_change
+        self._root_path    = root_path
+        self._on_change    = on_change
+        self._single_select = single_select
+        self._on_select    = on_select   # called with Path or None
 
-        # Checked state: path → bool  (pre-populate from preselected)
         self._checked: dict[Path, bool] = {
             p: True for p in (preselected or set())
         }
-        # Suppress on_change callbacks during initial render
         self._initialising: bool = True
-
-        # Expand state: path → bool  (True = expanded)
         self._expanded: dict[Path, bool] = {}
-
-        # NiceGUI checkbox widgets: path → ui.checkbox
         self._checkboxes: dict[Path, ui.checkbox] = {}
-
-        # Scanned tree root (set after async scan)
         self._tree_root: Optional[DbFolderTreeNode] = None
-
-        # Outer container
         self._container = ui.column().classes('w-full gap-0')
-
-        # Start async scan + render
         asyncio.create_task(self._scan_and_render())
 
     # ------------------------------------------------------------------
@@ -154,6 +146,17 @@ class DbFolderTree:
     def selected_folders(self) -> Set[Path]:
         """Return set of currently checked folder paths (that have a DB)."""
         return {p for p, checked in self._checked.items() if checked}
+
+    @property
+    def selected_folder(self) -> Optional[Path]:
+        """
+        Return the single selected folder (single_select mode only).
+        Returns None if nothing is selected.
+        """
+        for p, checked in self._checked.items():
+            if checked:
+                return p
+        return None
 
     # ------------------------------------------------------------------
     # Async scan + initial render
@@ -332,28 +335,26 @@ class DbFolderTree:
     # Checkbox logic
     # ------------------------------------------------------------------
 
-    def _on_checkbox_change(self, node: DbFolderTreeNode, checked: bool) -> None:
-        """Handle check/uncheck of a node.
-        
-        If the node has children and is collapsed, cascade recursively.
-        If the node has children and is expanded, only affect this node.
-        """
-        if self._initialising:
-            return
-        has_children = not node.is_leaf
-        is_expanded = self._expanded.get(node.path, False)
-        if has_children and not is_expanded:
-            # Collapsed with children → recursive
-            self._set_subtree_checked(node, checked)
-            for path, is_checked in self._checked.items():
-                cb = self._checkboxes.get(path)
-                if cb is not None:
-                    cb.set_value(is_checked)
+    def _on_checkbox_change(self, node: DbFolderTreeNode, value: bool) -> None:
+        if self._single_select:
+            if value:
+                # Deselect all others first
+                for p in list(self._checked.keys()):
+                    if p != node.path and self._checked.get(p):
+                        self._checked[p] = False
+                        if p in self._checkboxes:
+                            self._checkboxes[p].set_value(False)
+                self._checked[node.path] = True
+                if self._on_select:
+                    self._on_select(node.path)
+            else:
+                self._checked[node.path] = False
+                if self._on_select:
+                    self._on_select(None)
         else:
-            # Expanded or leaf → only this node
-            self._checked[node.path] = checked
-        self._refresh_group_checkboxes(self._tree_root)
-        self._notify_change()
+            self._checked[node.path] = value
+            if not self._initialising and self._on_change:
+                self._on_change(self.selected_folders)
 
     def _on_group_checkbox_change(self, node: DbFolderTreeNode, checked: bool) -> None:
         """Handle check/uncheck of a group header – cascades to all DB children."""

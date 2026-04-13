@@ -36,6 +36,31 @@ from ..job_queue import (
 from ..main import start_scout_process
 from ..db_queries import get_db_min_confidence
 
+# ---------------------------------------------------------------------------
+# Freigabe-Prüfung – einfügen in scouting_flight.py
+# ---------------------------------------------------------------------------
+
+def _is_folder_ready(folder: Path) -> bool:
+    """
+    Return True if a folder is configured and ready for the Scouting Flight.
+
+    Conditions (Konzept Abschnitt 6):
+      1. birdnet_analysis.db exists in the folder
+      2. db_meta_data has utc_time_method set (not NULL)
+
+    lat/lon is intentionally NOT required (Nordpol = valid "no location").
+    """
+    db_path = folder / 'birdnet_analysis.db'
+    if not db_path.exists():
+        return False
+    try:
+        from .db_queries import get_db_meta_data
+        meta = get_db_meta_data(db_path)
+        if not meta:
+            return False
+        return bool(meta.get('utc_time_method'))
+    except Exception:
+        return False
 
 # ---------------------------------------------------------------------------
 # Page registration
@@ -79,7 +104,8 @@ async def scouting_flight() -> None:
                 f for f in candidates
                 if (any(f.glob('*.wav')) or any(f.glob('*.WAV')))
                 and f not in page['added_folders']
-            ]
+                and _is_folder_ready(f)
+            ]   
             if not folders_to_add:
                 ui.notify('All folders already in scout list.', type='warning')
                 return
@@ -127,6 +153,14 @@ async def scouting_flight() -> None:
             else:
                 if folder not in page['added_folders']:
                     folders_to_add.append(folder)
+                    
+            if not _is_folder_ready(folder):
+                ui.notify(
+                    f'Folder "{folder.name}" is not configured yet. '
+                    'Please set up the database in DB Configuration first.',
+                    type='warning',
+                )
+                return
 
             if not folders_to_add:
                 ui.notify('All matching folders already in scout list.', type='warning')

@@ -686,4 +686,119 @@ def get_db_min_confidence(db_path: Path) -> Optional[float]:
     except ValueError:
         return None
     
-    
+
+def get_db_meta_data(db_path: Path) -> Optional[Dict]:
+    """
+    Read the single db_meta_data row.
+
+    Returns:
+        Dict with keys: gps_lat, gps_lon, utc_time_method, time_offset,
+        notes, kv_blob (raw bytes or None).
+        Returns None if table does not exist or row is missing.
+    """
+    conn = get_db_connection(db_path)
+    try:
+        cursor = conn.execute("SELECT * FROM db_meta_data WHERE id = 1")
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    except sqlite3.OperationalError:
+        logger.warning(f"db_meta_data table not found in {db_path}")
+        return None
+    finally:
+        conn.close()
+
+
+def set_db_meta_data(db_path: Path, **kwargs) -> bool:
+    """
+    Update fields in the single db_meta_data row.
+
+    Only the keys passed as kwargs are updated; others remain unchanged.
+    Valid keys: gps_lat, gps_lon, utc_time_method, time_offset, notes, kv_blob.
+    kv_blob: pass a Python dict – it will be pickled automatically.
+    """
+    import pickle
+
+    valid_keys = {'gps_lat', 'gps_lon', 'utc_time_method',
+                  'time_offset', 'notes', 'kv_blob'}
+    filtered = {k: v for k, v in kwargs.items() if k in valid_keys}
+    if not filtered:
+        logger.warning("set_db_meta_data: no valid keys provided")
+        return False
+
+    if 'kv_blob' in filtered and isinstance(filtered['kv_blob'], dict):
+        filtered['kv_blob'] = pickle.dumps(filtered['kv_blob'])
+
+    assignments = ', '.join(f"{k} = ?" for k in filtered)
+    values = list(filtered.values())
+
+    try:
+        conn = get_db_connection(db_path)
+        conn.execute(
+            f"UPDATE db_meta_data SET {assignments} WHERE id = 1",
+            values,
+        )
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"set_db_meta_data failed: {e}")
+        return False
+
+
+def get_kv_blob(db_path: Path) -> Optional[Dict]:
+    """
+    Read and unpickle the kv_blob from db_meta_data.
+
+    Returns:
+        Python dict, or None if blob is empty or unpickling fails.
+    """
+    import pickle
+
+    row = get_db_meta_data(db_path)
+    if not row or not row.get('kv_blob'):
+        return None
+    try:
+        return pickle.loads(row['kv_blob'])
+    except Exception as e:
+        logger.error(f"get_kv_blob: unpickling failed: {e}")
+        return None
+
+
+def get_utc_methods(db_path: Path) -> List[Dict]:
+    """
+    Return all registered UTC time extraction methods.
+
+    Returns:
+        List of dicts with keys: name, description.
+        Empty list if table does not exist.
+    """
+    conn = get_db_connection(db_path)
+    try:
+        cursor = conn.execute(
+            "SELECT name, description FROM utc_methods ORDER BY name"
+        )
+        return [dict(row) for row in cursor.fetchall()]
+    except sqlite3.OperationalError:
+        logger.warning(f"utc_methods table not found in {db_path}")
+        return []
+    finally:
+        conn.close()
+
+
+def add_utc_method(db_path: Path, name: str, description: str) -> bool:
+    """
+    Register a new UTC time extraction method.
+    Uses INSERT OR IGNORE so existing methods are never overwritten.
+    """
+    try:
+        conn = get_db_connection(db_path)
+        conn.execute(
+            "INSERT OR IGNORE INTO utc_methods (name, description) VALUES (?, ?)",
+            (name, description),
+        )
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"add_utc_method failed for '{name}': {e}")
+        return False
