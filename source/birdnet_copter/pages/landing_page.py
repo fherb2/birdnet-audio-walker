@@ -89,7 +89,7 @@ async def landing_page() -> None:
                 'settings and global index.',
             ),
             (
-                '/static/icons/db_icon.svg', 'DB Configuration',
+                '/static/icons/db_icon_32.svg', 'DB Configuration',
                 '/db-config',
                 'Prepare a folder for analysis: set GPS location, UTC time method '
                 'and metadata for a recording session.',
@@ -130,9 +130,7 @@ async def landing_page() -> None:
                             _svg_path = _Path(__file__).parent.parent / 'pages' / icon.lstrip('/')
                             try:
                                 _svg = _svg_path.read_text(encoding='utf-8')
-                                svg_content = re.sub(r'width="[^"]*"', 'width="32"', svg_content)
-                                svg_content = re.sub(r'height="[^"]*"', 'height="36"', svg_content)
-                                svg_content = svg_content.replace('<svg ', '<svg style="display:block;" ', 1)
+                                _svg = _svg.replace('<svg ', '<svg style="display:block;" ', 1)
                                 ui.html(_svg)
                             except Exception:
                                 ui.label('?').classes('text-h5')

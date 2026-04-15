@@ -99,7 +99,7 @@ def _check_control(bundle: QueueBundle,
     stop_flag[0] = True  → stop after current file
     wait_flag[0] = True  → pause after current batch
     """
-    while not bundle.control_queue.empty():
+    while True:
         try:
             signal = bundle.control_queue.get_nowait()
         except Exception:
@@ -162,7 +162,12 @@ def _process_folder(
 
     # --- DB init / rebuild ---
     if not db_path.exists():
-        init_database(str(db_path))
+        logger.error(f"Walker: DB not found for {folder_path}, skipping job.")
+        job.status = 'error'
+        job.error_msg = 'Database not found – configure in DB Configuration first.'
+        job.finished_at = datetime.now()
+        _send_progress(bundle, job)
+        return
     elif job.rescan_species:
         rebuild_detections(str(db_path))
 
@@ -186,6 +191,14 @@ def _process_folder(
 
     if missing:
         for wav in wav_files:
+            _check_control(bundle, stop_flag, wait_flag)
+            if stop_flag[0]:
+                logger.info("Scout: stop requested, aborting metadata extraction")
+                break
+            if wait_flag[0]:
+                _block_until_resume(bundle, job, stop_flag, wait_flag)
+                if stop_flag[0]:
+                    break
             if wav.name not in missing:
                 continue
             try:
@@ -209,6 +222,14 @@ def _process_folder(
     for wav in wav_files:
         if wav.name not in not_completed or wav.name in metadata_map:
             continue
+        _check_control(bundle, stop_flag, wait_flag)
+        if stop_flag[0]:
+            logger.info("Scout: stop requested, aborting metadata load")
+            break
+        if wait_flag[0]:
+            _block_until_resume(bundle, job, stop_flag, wait_flag)
+            if stop_flag[0]:
+                break
         try:
             meta = extract_metadata(str(wav))
             meta['path'] = str(wav)
@@ -216,7 +237,7 @@ def _process_folder(
         except Exception as e:
             logger.error(f"Scout: metadata load failed for {wav.name}: {e}")
 
-    files_to_process = [metadata_map[n] for n in not_completed if n in metadata_map]
+    files_to_process = [metadata_map[n] for n in sorted(not_completed) if n in metadata_map]
 
     if not files_to_process:
         logger.info(f"Scout: all files already processed in {folder_path}")
@@ -238,6 +259,7 @@ def _process_folder(
 
     # --- processing loop ---
     for meta in files_to_process:
+        _check_control(bundle, stop_flag, wait_flag)
         if stop_flag[0]:
             logger.info("Scout: stop requested, aborting folder processing")
             break
@@ -369,6 +391,22 @@ def run_scout_process(
     wait_flag = [False]   # [0] = pause after current batch
 
     while True:
+        # If previous job was terminated: drain all remaining queued jobs as skipped
+        if stop_flag[0]:
+            while True:
+                try:
+                    pending = bundle.job_queue.get_nowait()
+                    if pending is SIGNAL_SHUTDOWN:
+                        bundle.job_queue.put(SIGNAL_SHUTDOWN)
+                        break
+                    if isinstance(pending, ScanJob):
+                        pending.status = 'skipped'
+                        pending.error_msg = 'terminated by user'
+                        pending.finished_at = datetime.now()
+                        _send_progress(bundle, pending)
+                except Exception:
+                    break
+
         # Reset per-job stop flag; wait_flag persists across jobs until RESUME
         stop_flag[0] = False
 

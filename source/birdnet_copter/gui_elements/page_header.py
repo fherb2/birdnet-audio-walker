@@ -75,11 +75,9 @@ def page_header(symbol: str, name: str, help_file: str, lang: str = 'de') -> Non
                 svg_path = Path(__file__).parent.parent / 'pages' / symbol.lstrip('/')
                 try:
                     svg_content = svg_path.read_text(encoding='utf-8')
-                    svg_content = re.sub(r'width="[^"]*"', 'width="32"', svg_content)
-                    svg_content = re.sub(r'height="[^"]*"', 'height="36"', svg_content)
                     svg_content = svg_content.replace('<svg ', '<svg style="display:block;" ', 1)
                     ui.html(svg_content)
-                except Exception:
+                except Exception as e:
                     ui.label('?').classes('text-h5')
             else:
                 ui.label(symbol).classes('text-h5')

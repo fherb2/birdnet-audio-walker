@@ -34,7 +34,7 @@ from ..job_queue import (
     SIGNAL_STOP,
 )
 from ..main import start_scout_process
-from ..db_queries import get_db_min_confidence
+from ..db_queries import get_db_min_confidence, get_db_meta_data
 
 # ---------------------------------------------------------------------------
 # Freigabe-Prüfung – einfügen in scouting_flight.py
@@ -54,7 +54,6 @@ def _is_folder_ready(folder: Path) -> bool:
     if not db_path.exists():
         return False
     try:
-        from .db_queries import get_db_meta_data
         meta = get_db_meta_data(db_path)
         if not meta:
             return False
@@ -148,7 +147,7 @@ async def scouting_flight() -> None:
                 )
                 for f in candidates:
                     has_wav = any(f.glob('*.wav')) or any(f.glob('*.WAV'))
-                    if has_wav and f not in page['added_folders']:
+                    if has_wav and f not in page['added_folders'] and _is_folder_ready(f):
                         folders_to_add.append(f)
             else:
                 if folder not in page['added_folders']:
@@ -192,6 +191,13 @@ async def scouting_flight() -> None:
             from ..job_queue import progress_msg
             from ..db_queries import get_db_min_confidence
             db_path = folder / 'birdnet_analysis.db'
+            if not _is_folder_ready(folder):
+                ui.notify(
+                    f'Folder "{folder.name}" is not configured yet. '
+                    'Please set up the database in DB Configuration first.',
+                    type='warning',
+                )
+                return
             min_conf = get_db_min_confidence(db_path) or float(min_conf_input.value or 0.4)
             # Rebuild always uses current cockpit confidence
             conf = float(min_conf_input.value or 0.4)
@@ -307,7 +313,7 @@ async def scouting_flight() -> None:
                         ui.label(j.get('current_file', '')).classes(
                             'flex-grow text-caption text-grey-6'
                         )
-                        if status == 'pending':
+                        if status in ('pending', 'skipped', 'error', 'done'):
                             job_id = j.get('job_id')
                             ui.button(
                                 icon='close',
@@ -324,6 +330,12 @@ async def scouting_flight() -> None:
     def _build_status_line() -> str:
         ws = bundle.shared_state.get('walker_status', 'idle')
         jobs: list = list(bundle.shared_state.get('jobs', []))
+
+        if ws == 'stopping':
+            birdnet_active = bundle.shared_state.get('birdnet_active', False)
+            if birdnet_active:
+                return '⏹ Finishing current BirdNET analysis…'
+            return '⏹ Stopping…'
 
         if ws == 'idle':
             return '🚁 idle'
@@ -441,7 +453,7 @@ async def scouting_flight() -> None:
 
             def _on_terminate() -> None:
                 send_control(bundle, SIGNAL_STOP)
-                bundle.shared_state['walker_status'] = 'idle'
+                bundle.shared_state['walker_status'] = 'stopping'
                 _update_control_buttons()
 
             terminate_btn = ui.button(
@@ -464,6 +476,9 @@ async def scouting_flight() -> None:
         elif ws == 'wait_pending':
             start_btn.disable()
             start_btn.tooltip(_WAIT_MSG)
+        elif ws == 'stopping':
+            start_btn.disable()
+            start_btn.tooltip('Stopping – please wait')
         else:
             start_btn.disable()
             start_btn.tooltip(_ALREADY_FLYING if ws == 'flying' else _HOVERING)

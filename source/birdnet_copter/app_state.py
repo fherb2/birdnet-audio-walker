@@ -52,7 +52,7 @@ class AppState:
     # Walker / job queue state  (read-only view for GUI)
     # ------------------------------------------------------------------
     jobs: List[Dict] = field(default_factory=list)
-    walker_status: str = 'idle'   # 'idle'|'running'|'wait_pending'|'waiting'
+    walker_status: str = 'idle'   # 'idle'|'flying'|'wait_pending'|'waiting'|'stopping'
     
     # ------------------------------------------------------------------
     # DB Configuration page state  (db_file_prep.py)

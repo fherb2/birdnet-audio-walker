@@ -218,14 +218,22 @@ def drain_progress_queue(bundle: QueueBundle) -> None:
         # Update top-level walker_status
         status = msg.get('status')
         if status:
-            if status == 'flying':
+            current_ws = bundle.shared_state.get('walker_status', 'idle')
+            if status == 'flying' and current_ws != 'stopping':
                 bundle.shared_state['walker_status'] = 'flying'
+            elif status == 'waiting' and current_ws not in ('stopping',):
+                bundle.shared_state['walker_status'] = 'waiting'
             elif status in ('done', 'error', 'skipped'):
                 any_active = any(
                     j.get('status') in ('pending', 'flying')
                     for j in jobs
                 )
-                bundle.shared_state['walker_status'] = 'flying' if any_active else 'idle'
+                if current_ws == 'stopping':
+                    # Only transition to idle, never back to flying
+                    if not any_active:
+                        bundle.shared_state['walker_status'] = 'idle'
+                else:
+                    bundle.shared_state['walker_status'] = 'flying' if any_active else 'idle'
 
         updated = True
 

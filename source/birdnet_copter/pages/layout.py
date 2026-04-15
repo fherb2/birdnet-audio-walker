@@ -113,7 +113,7 @@ def create_layout(app_state: AppState) -> ui.left_drawer:
         nav_items = [
         ('🅗',  'Landing Page',         '/'),
         ('🛠',  'Hangar (Technical Config)', '/hangar'),
-        ('/static/icons/db_icon.svg', 'DB Configuration', '/db-config'),
+        ('/static/icons/db_icon_32.svg', 'DB Configuration', '/db-config'),
         ('🚁',  'Scouting Flight',      '/scouting'),
         ('🗺',  'Exploration Area',     '/exploration'),
         ('🎧',  'Audio Player',         '/audio-player'),
