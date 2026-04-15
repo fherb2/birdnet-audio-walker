@@ -55,7 +55,7 @@ async def db_file_prep() -> None:
     
     create_layout(state)
 
-    page_header('/static/icons/db_icon.svg', 'Database Configuration', 'db_file_prep')
+    page_header('/static/icons/db_icon_32.svg', 'Database Configuration', 'db_file_prep')
 
     # ------------------------------------------------------------------
     # Header override: second row shows selected folder in dark red
