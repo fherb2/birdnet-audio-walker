@@ -144,65 +144,68 @@ async def hangar() -> None:
             logger.debug(f'use_gpu set to {val}')
 
     # -----------------------------------------------------------------------
-    # Section 4: Global Index
+    # Section 4: Global Index  [HIDDEN – prepared for embedding vector support]
+    # A global index merges local embedding databases across folders.
+    # This requires a consistent embedding model and schema across all DBs.
+    # Re-enable together with the embedding vectors feature (scan_embeddings).
     # -----------------------------------------------------------------------
-    with section_card('🌐', 'Global Index', 'hangar_global_index'):
-
-        use_global_toggle = ui.switch(
-            'Create / Use Global Index',
-            value=state.global_index_path is not None,
-            on_change=lambda e: _on_global_toggle(e.value),
-        )
-
-        global_path_row = ui.row().classes('items-center gap-3 q-mt-xs')
-        with global_path_row:
-            global_path_display = ui.label(
-                str(state.global_index_path or state.root_path)
-            ).classes('text-body2 text-grey-10 flex-grow')
-            ui.button('📁 Change', on_click=lambda: asyncio.create_task(_open_global_dialog())).props('no-caps')
-
-        ui.label(
-            'A global index combines all local databases into one overarching database.'
-        ).classes('text-caption text-grey-6')
-
-        def _on_global_toggle(val: bool) -> None:
-            global_path_row.set_visibility(val)
-            if not val:
-                state.global_index_path = None
-                state.active_db_is_global = False
-            else:
-                if state.global_index_path is None:
-                    state.global_index_path = state.root_path
-                global_path_display.set_text(str(state.global_index_path))
-
-        global_path_row.set_visibility(state.global_index_path is not None)
-
-    with ui.dialog() as global_dialog:
-        with ui.card().classes('w-96') as global_dialog_card:
-            pass
-
-    async def _open_global_dialog() -> None:
-        global_dialog_card.clear()
-        with global_dialog_card:
-            ui.label('Select Global Index Path').classes('text-h6 q-mb-sm')
-            selected_global: dict = {'value': state.global_index_path or state.root_path}
-
-            def _on_global_select(p: Path) -> None:
-                selected_global['value'] = p
-
-            FolderTree(root_path=state.global_index_path or state.root_path, on_select=_on_global_select, show_extras=False)
-
-            with ui.row().classes('q-mt-sm gap-2 justify-end w-full'):
-                ui.button('Cancel', on_click=global_dialog.close).props('no-caps flat')
-
-                def _confirm_global() -> None:
-                    state.global_index_path = selected_global['value']
-                    global_path_display.set_text(str(state.global_index_path))
-                    global_dialog.close()
-
-                ui.button('✔ Confirm', on_click=_confirm_global).props('no-caps color=primary')
-
-        global_dialog.open()
+    # with section_card('🌐', 'Global Index', 'hangar_global_index'):
+    #
+    #     use_global_toggle = ui.switch(
+    #         'Create / Use Global Index',
+    #         value=state.global_index_path is not None,
+    #         on_change=lambda e: _on_global_toggle(e.value),
+    #     )
+    #
+    #     global_path_row = ui.row().classes('items-center gap-3 q-mt-xs')
+    #     with global_path_row:
+    #         global_path_display = ui.label(
+    #             str(state.global_index_path or state.root_path)
+    #         ).classes('text-body2 text-grey-10 flex-grow')
+    #         ui.button('📁 Change', on_click=lambda: asyncio.create_task(_open_global_dialog())).props('no-caps')
+    #
+    #     ui.label(
+    #         'A global index combines all local databases into one overarching database.'
+    #     ).classes('text-caption text-grey-6')
+    #
+    #     def _on_global_toggle(val: bool) -> None:
+    #         global_path_row.set_visibility(val)
+    #         if not val:
+    #             state.global_index_path = None
+    #             state.active_db_is_global = False
+    #         else:
+    #             if state.global_index_path is None:
+    #                 state.global_index_path = state.root_path
+    #             global_path_display.set_text(str(state.global_index_path))
+    #
+    #     global_path_row.set_visibility(state.global_index_path is not None)
+    #
+    # with ui.dialog() as global_dialog:
+    #     with ui.card().classes('w-96') as global_dialog_card:
+    #         pass
+    #
+    # async def _open_global_dialog() -> None:
+    #     global_dialog_card.clear()
+    #     with global_dialog_card:
+    #         ui.label('Select Global Index Path').classes('text-h6 q-mb-sm')
+    #         selected_global: dict = {'value': state.global_index_path or state.root_path}
+    #
+    #         def _on_global_select(p: Path) -> None:
+    #             selected_global['value'] = p
+    #
+    #         FolderTree(root_path=state.global_index_path or state.root_path, on_select=_on_global_select, show_extras=False)
+    #
+    #         with ui.row().classes('q-mt-sm gap-2 justify-end w-full'):
+    #             ui.button('Cancel', on_click=global_dialog.close).props('no-caps flat')
+    #
+    #             def _confirm_global() -> None:
+    #                 state.global_index_path = selected_global['value']
+    #                 global_path_display.set_text(str(state.global_index_path))
+    #                 global_dialog.close()
+    #
+    #             ui.button('✔ Confirm', on_click=_confirm_global).props('no-caps color=primary')
+    #
+    #     global_dialog.open()
         
     # -----------------------------------------------------------------------
     # Section 5: Language Configuration

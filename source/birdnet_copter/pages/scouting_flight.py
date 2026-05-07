@@ -391,14 +391,19 @@ async def scouting_flight() -> None:
                 step=0.05,
                 format='%.2f',
             ).classes('w-36')
-            with ui.column().classes('gap-0'):
-                embeddings_toggle = ui.switch(
-                    'Include Embedding Vectors',
-                    value=False,
-                )
-                ui.label(
-                    'Extracts 1024-dim feature vectors. Increases analysis time by approx. 2×.'
-                ).classes('text-caption text-grey-6')
+            # Embedding vectors toggle [HIDDEN – prepared for future feature]
+            # Re-enable together with Global Index in hangar.py (Section 4).
+            # scan_embeddings is already wired in ScanJob and scout_process.
+            # with ui.column().classes('gap-0'):
+            #     embeddings_toggle = ui.switch(
+            #         'Include Embedding Vectors',
+            #         value=False,
+            #     )
+            #     ui.label(
+            #         'Extracts 1024-dim feature vectors. Increases analysis time by approx. 2×.'
+            #     ).classes('text-caption text-grey-6')
+            embeddings_toggle = ui.switch('Include Embedding Vectors', value=False)
+            embeddings_toggle.set_visibility(False)
 
         with ui.row().classes('gap-2 items-center q-mb-sm flex-wrap'):
 
