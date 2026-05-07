@@ -1,3 +1,4 @@
+from . import closed            # noqa: F401
 from . import landing_page      # noqa: F401
 from . import hangar            # noqa: F401
 from . import db_file_prep      # noqa: F401

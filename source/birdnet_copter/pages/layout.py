@@ -131,6 +131,40 @@ def create_layout(app_state: AppState) -> ui.left_drawer:
                 ui.label(label).classes('text-body2')
 
     # ------------------------------------------------------------------
+    # Shutdown dialog
+    # ------------------------------------------------------------------
+    with ui.dialog() as shutdown_dialog, ui.card():
+        ui.label('⏹ Shut down birdnet-copter?').classes('text-h6')
+        ui.separator()
+        ui.label(
+            'The current BirdNET analysis file will be completed first. '
+            'All other pending jobs will be stopped cleanly.'
+        ).classes('text-body2 text-grey-8 q-mt-sm')
+        with ui.row().classes('q-mt-md gap-2 justify-end w-full'):
+            ui.button('Cancel', on_click=shutdown_dialog.close).props('no-caps flat')
+            ui.button(
+                'Shut down',
+                on_click=lambda: _do_shutdown(),
+            ).props('no-caps color=negative')
+
+    def _do_shutdown() -> None:
+        shutdown_dialog.close()
+        bundle = nicegui_app.state.bundle
+        from ..job_queue import shutdown_scouting, send_control, SIGNAL_STOP
+        send_control(bundle, SIGNAL_STOP)
+        shutdown_scouting(bundle)
+        # Signal all clients via shared_state to navigate to /closed
+        bundle.shared_state['app_shutting_down'] = True
+        # Shut down server after clients have had time to navigate (~2 s)
+        async def _delayed_shutdown():
+            import asyncio as _asyncio
+            await _asyncio.sleep(2.0)
+            nicegui_app.shutdown()
+        import asyncio as _asyncio
+        _asyncio.create_task(_delayed_shutdown())
+        logger.info("Graceful shutdown initiated from GUI")
+        
+    # ------------------------------------------------------------------
     # GPU error dialog (created before header so the button can ref it)
     # ------------------------------------------------------------------
     with ui.dialog() as gpu_error_dialog, ui.card().classes('w-2/3'):
@@ -176,10 +210,15 @@ def create_layout(app_state: AppState) -> ui.left_drawer:
                 db_label = ui.label(_relative_db_label(app_state)) \
                     .classes(f'{hs["body"]} font-bold')
 
-            # --- right column: access mode + spinner ---
+            # --- right column: access mode + spinner + shutdown button ---
             with ui.row().classes('items-center justify-end gap-3'):
                 access_text = '🔒 read-only' if app_state.read_only else '✏️ read-write'
                 ui.label(access_text).classes(hs['caption'])
+                ui.button(
+                    icon='power_settings_new',
+                    on_click=shutdown_dialog.open,
+                ).props('flat dense round color=white').classes('q-ml-4') \
+                 .tooltip('Shut down birdnet-copter')
 
         # GPU error button – outside the grid so it doesn't affect row height
         gpu_err_btn = ui.button(
@@ -201,6 +240,11 @@ def create_layout(app_state: AppState) -> ui.left_drawer:
 
     def _update_paths():
         try:
+            # Check for graceful shutdown signal
+            if app_state.shared_state and \
+                    app_state.shared_state.get('app_shutting_down', False):
+                ui.navigate.to('/closed')
+                return
             root_label.set_text(str(app_state.root_path))
             db_label.set_text(_relative_db_label(app_state))
         except Exception:
@@ -228,6 +272,17 @@ def create_layout(app_state: AppState) -> ui.left_drawer:
     t_spinner   = ui.timer(0.5, _update_spinner)
     t_paths     = ui.timer(1.0, _update_paths)
     t_gpu_error = ui.timer(2.0, _update_gpu_error_state)
+
+    # Shutdown timer: fires once after all clients have had time to navigate
+    async def _do_nicegui_shutdown():
+        await asyncio.import_module('asyncio').sleep(2.0)
+        nicegui_app.shutdown()
+
+    if app_state.shared_state and \
+            app_state.shared_state.get('app_shutting_down', False):
+        import asyncio as _asyncio
+        _asyncio.create_task(_do_nicegui_shutdown())
+
 
     # ------------------------------------------------------------------
     # Auto-open dialog if gpu_error is already set at page load

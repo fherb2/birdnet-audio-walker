@@ -3,6 +3,7 @@ tests/test_data_original/
 tests/test_data_working/
 tests/test_results/
 
+project_source.txt
 
 
 # Byte-compiled / optimized / DLL files
